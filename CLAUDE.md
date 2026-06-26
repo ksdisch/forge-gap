@@ -21,10 +21,16 @@ faults rather than found naturally, say so plainly in the README and writeup.
 ## File map
 - `glm.py` — the minimal GLM-via-OpenRouter client (`chat()`, `MODEL`). The foundation
   everything builds on. Forwards `tools` / `tool_choice` / `temperature` straight through.
+- `agent.py` — the scenario-agnostic reason→act→observe loop + deterministic grading. ZERO
+  mechanisms (the bare baseline). Pure `dispatch()`; per-step JSONL trajectory plus a `grade` event.
+- `scenario.py` — the S2 lookup-then-compute task as data: a frozen `Scenario` (two chained
+  lookup tools + a `submit_answer` terminal tool + known ground truth).
+- `oracle.py` — the deterministic grader (`grade()`): computed value vs known ground truth,
+  never an LLM judge. Pure and unit-tested.
 - `verify.py` — smoke test proving chat + tool-calling work.
+- `test_oracle.py` — offline unit tests for the oracle, scenario ground truth, and `dispatch`.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
-- *(planned)* the reason→act→observe loop, the lookup-then-compute scenario + oracle, the
-  N-trial ablation runner, and the chart.
+- *(planned)* the N-trial ablation runner and the gap-closure chart.
 
 ## Methodology guardrails (load-bearing — do not drift)
 - **Deterministic oracle, never an LLM judge.** Task success is measured against known
