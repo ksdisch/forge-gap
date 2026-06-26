@@ -7,7 +7,11 @@ a smoke test that proves both **chat** and **tool-calling** work.
 ```
 forge-gap/
 ├─ glm.py          # the reusable client: chat(), MODEL  ← import this in harness code
+├─ agent.py        # the reason→act→observe loop + deterministic grading
+├─ scenario.py     # the S2 lookup-then-compute task (2 tools + ground truth)
+├─ oracle.py       # the deterministic grader (never an LLM judge)
 ├─ verify.py       # smoke test: plain chat + one tool-calling round-trip
+├─ test_oracle.py  # offline unit tests (oracle + scenario + dispatch)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv)
@@ -52,6 +56,30 @@ print(resp.choices[0].message.content)
 `chat(...)` forwards `tools=`, `tool_choice=`, `temperature=`, `max_tokens=`, etc.
 straight to the API — that's the surface your harness logic (retry nudges, error
 recovery, step enforcement) will wrap.
+
+## 5. Run the agent (S2 — scenario + oracle)
+
+`agent.py` runs the bare **reason → act → observe** loop on a multi-step tool task and grades
+the result against known ground truth — *deterministically*, never with an LLM judge.
+
+```bash
+uv run agent.py
+```
+
+The default task (`scenario.py`) is a **lookup-then-compute** scenario: GLM looks up an order,
+looks up the shipping rate for that order's zone (a *chained* lookup), adds them, and calls
+`submit_answer` with the total. The oracle (`oracle.py`) compares GLM's submitted number to the
+known answer (140 + 18 = **158**) and prints **PASS**/**FAIL**. Every step is appended to
+`trajectory.jsonl` (gitignored) for hand-reading.
+
+Offline, before spending API calls, run the unit tests:
+
+```bash
+uv run test_oracle.py
+```
+
+One run is a single sample — a PASS/FAIL *rate* over many runs (with confidence intervals) is
+what later sessions measure.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
