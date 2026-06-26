@@ -16,15 +16,15 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()  # load harness-lab/.env into the environment
+load_dotenv()  # load forge-gap/.env into the environment
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 MODEL = os.getenv("OPENROUTER_MODEL", "z-ai/glm-4.6")
 
 # Optional OpenRouter attribution headers (they show up on your activity page).
 _DEFAULT_HEADERS = {
-    "HTTP-Referer": os.getenv("OPENROUTER_APP_URL", "https://localhost/harness-lab"),
-    "X-Title": os.getenv("OPENROUTER_APP_TITLE", "harness-lab"),
+    "HTTP-Referer": os.getenv("OPENROUTER_APP_URL", "https://localhost/forge-gap"),
+    "X-Title": os.getenv("OPENROUTER_APP_TITLE", "forge-gap"),
 }
 
 
@@ -37,7 +37,7 @@ def client() -> OpenAI:
     key = os.getenv("OPENROUTER_API_KEY")
     if not key or "REPLACE" in key:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is not set. Put your key in harness-lab/.env "
+            "OPENROUTER_API_KEY is not set. Put your key in forge-gap/.env "
             "(see README.md -> 'Get your key')."
         )
     return OpenAI(

@@ -1,11 +1,11 @@
-# harness-lab
+# forge-gap
 
 The GLM-via-OpenRouter connection you'll build AI harnesses around. OpenRouter
 exposes an **OpenAI-compatible** API, so this is a thin client over GLM-4.6 plus
 a smoke test that proves both **chat** and **tool-calling** work.
 
 ```
-harness-lab/
+forge-gap/
 ├─ glm.py          # the reusable client: chat(), MODEL  ← import this in harness code
 ├─ verify.py       # smoke test: plain chat + one tool-calling round-trip
 ├─ .env            # your key lives here (gitignored)
@@ -20,7 +20,7 @@ harness-lab/
    cheap (~$0.40 / 1M input tokens). $5–$10 covers a huge amount of dev. *(Skip if you
    already have a balance.)*
 3. Create a key at **https://openrouter.ai/keys** → **Create Key** → name it
-   `harness-lab` → copy it (starts with `sk-or-v1-...`).
+   `forge-gap` → copy it (starts with `sk-or-v1-...`).
 
 ## 2. Drop the key in
 
@@ -30,7 +30,7 @@ Open `.env` and paste the key after `OPENROUTER_API_KEY=`, then save. That's it 
 ## 3. Verify
 
 ```bash
-cd ~/Desktop/john_SE_work/harness-lab
+cd ~/Desktop/forge-gap
 uv run verify.py
 ```
 

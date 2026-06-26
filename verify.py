@@ -77,7 +77,7 @@ def main() -> int:
         print("FAILED\n")
         print(f"Error: {type(e).__name__}: {e}")
         print("\nCommon causes:")
-        print("  - Key missing / typo'd    -> check harness-lab/.env")
+        print("  - Key missing / typo'd    -> check forge-gap/.env")
         print("  - No OpenRouter credits   -> add a few $ at openrouter.ai/credits")
         print("  - Model slug changed      -> check OPENROUTER_MODEL in .env")
         return 1
