@@ -30,6 +30,9 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `verify.py` — smoke test proving chat + tool-calling work.
 - `test_oracle.py` — offline unit tests for the oracle, scenario ground truth, and `dispatch`.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
+- `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
+  why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
+  `/wrap` recaps). Start here to catch up; see `docs/README.md`.
 - *(planned)* the N-trial ablation runner and the gap-closure chart.
 
 ## Methodology guardrails (load-bearing — do not drift)
@@ -47,9 +50,28 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - Record GLM `temperature` (don't chase determinism via temp 0 — GLM is non-deterministic
   regardless; get signal from N).
 
+## Working with Kyle — teaching standard + per-stage rhythm (load-bearing)
+Kyle is driving this project to learn it deeply (it may become his career) and is sharp but
+**new to coding jargon** — no CS degree. The job isn't just to ship code; it's to leave him able
+to *defend every decision*. These rules bind **every session and tab**.
+
+- **Explain-clearly standard.** Plain English first; define **every** jargon term the first time
+  it appears, inline; **clearer, not longer** (the simplest accurate explanation, not the most
+  exhaustive). If something stays fuzzy, that's a bug in the explanation — fix it.
+- **Decision-brief format.** For any real choice, don't just pick — lay out 2–3 options in plain
+  terms, each with its trade-off, plus your recommendation *and the reason*. Kyle decides or signs
+  off; clear options are what make weighing in possible.
+- **Per-stage rhythm (update the spine in `docs/`).** *Start of a stage:* write the plain-terms
+  brief + the real options into `docs/` before coding. *End of a stage:* update `ROADMAP.md`
+  (status), append the choice to `DECISIONS.md` (options + why), add the teaching note + new words
+  to `LEARNING.md`, and ask 3 recall questions. The raw blow-by-blow still goes to
+  `docs/session-logs/` via `/wrap`; the three curated docs are the distilled version
+  (see `docs/README.md`).
+
 ## Working conventions
-- **Teach while building.** After non-trivial code, explain what/why in plain English and
-  define any jargon. The goal is code the author can defend line by line.
+- **Teach while building.** After non-trivial code, explain what/why in plain English and define
+  any jargon — see **"Working with Kyle"** above for the full standard + per-stage rhythm. The
+  goal is code the author can defend line by line.
 - **Keep it lean.** No premature abstractions, no mechanisms before the baseline reads
   honestly. Scope is one legible deliverable, not breadth.
 - **Secrets:** never print or commit the `.env` value; only `.env.example` is tracked.
