@@ -1,0 +1,14 @@
+[project]
+name = "harness-lab"
+version = "0.1.0"
+description = "GLM-via-OpenRouter sandbox — the model to build AI harnesses around."
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+# This is an application, not a distributable package — uv manages the venv
+# and (if needed) a project Python automatically. Run things with `uv run ...`.
+package = false
