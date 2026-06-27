@@ -53,6 +53,11 @@ MAX_STEPS = 6        # generous; the happy path resolves in ~3 reasoning turns.
 TEMPERATURE = 0.7    # Non-zero on purpose. We never fake determinism via temp 0 —
                      # GLM is stochastic regardless; signal comes from N, not temp.
                      # We always record the temperature we used (see the run header).
+MAX_TOKENS = 2048    # Cap completion length per turn. Our turns run ~70-300 tokens, so this
+                     # never truncates a real answer; it exists so OpenRouter reserves credits
+                     # for 2048 tokens/call instead of its ~64k default — the unbounded default
+                     # trips a 402 "insufficient credits" on a low balance even though actual
+                     # spend is tiny. This is API/cost hygiene, NOT a reliability mechanism.
 TRAJECTORY_PATH = "trajectory.jsonl"
 
 
@@ -81,15 +86,19 @@ def _now() -> str:
 def run(
     scenario: Scenario = ORDER_SCENARIO,
     *,
+    model: str | None = None,
     max_steps: int = MAX_STEPS,
     temperature: float = TEMPERATURE,
     out_path: str = TRAJECTORY_PATH,
 ) -> dict:
     """Run one reason->act->observe loop to completion, then grade it.
 
-    Returns a small summary dict (including the oracle's correct/submitted/expected);
-    writes the full trajectory to `out_path`.
+    `model` overrides which model the loop calls (default: the env/`MODEL` default). That single
+    knob is what lets one runner drive a GLM arm and a frontier arm through the *same* loop — the
+    machinery is identical; only the model swaps. Returns a small summary dict (the oracle's
+    correct/submitted/expected plus the model used); writes the full trajectory to `out_path`.
     """
+    resolved_model = model or MODEL
     messages = [
         {"role": "system", "content": scenario.system_prompt},
         {"role": "user", "content": scenario.task},
@@ -100,8 +109,9 @@ def run(
         records.append(rec)
 
     log({
-        "event": "run", "ts": _now(), "model": MODEL, "scenario": scenario.name,
-        "temperature": temperature, "max_steps": max_steps, "task": scenario.task,
+        "event": "run", "ts": _now(), "model": resolved_model, "scenario": scenario.name,
+        "temperature": temperature, "max_steps": max_steps, "max_tokens": MAX_TOKENS,
+        "task": scenario.task,
         "ground_truth": scenario.ground_truth,
     })
 
@@ -111,7 +121,8 @@ def run(
     prompt_tokens = completion_tokens = 0
 
     for step in range(max_steps):
-        resp = chat(messages, tools=scenario.tools, tool_choice="auto", temperature=temperature)
+        resp = chat(messages, model=resolved_model, tools=scenario.tools,
+                    tool_choice="auto", temperature=temperature, max_tokens=MAX_TOKENS)
         choice = resp.choices[0]
         msg = choice.message
         usage = resp.usage
@@ -207,6 +218,7 @@ def run(
 
     return {
         "scenario": scenario.name,
+        "model": resolved_model,
         "stop": stop,
         "correct": correct,
         "submitted": submitted,

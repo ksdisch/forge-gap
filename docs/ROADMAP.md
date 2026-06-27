@@ -11,7 +11,7 @@ Stages are labelled **S0, S1, S2, …** — each is roughly one build session.
 | **S0** | Stands up the foundation: a tiny client (`glm.py`) that talks to GLM-4.6, plus a smoke test (`verify.py`) proving both plain chat **and** tool-calling work. | You can't build an agent until the connection — especially tool-calling — is proven. | ✅ done |
 | **S1** | The bare **reason → act → observe** loop (`agent.py`): ask the model what to do, run the tool it asks for, feed the result back, repeat. **Zero** reliability features. | "Build the ugliest working version first." You need a no-help baseline before you can measure how much *any* help adds. | ✅ done |
 | **S2** | Swaps the placeholder task for the **real** one: look up an order, look up its zone's shipping rate (a *chained* lookup), add them, submit the total — graded against the known answer (158) by a deterministic **oracle**, never another AI. | Gives the project a real task whose failures are *mechanical* ("called the wrong tool"), not *cognitive* ("bad at math") — the distinction the whole thesis rests on. | ✅ done |
-| **S3** | Run that task **many times**, GLM-4.6 vs a frontier model; show GLM fails more often, and hand-read the failures to prove they're mechanical / recoverable. | Proves the two claims everything depends on: a gap exists, and it's the *fixable* kind. | ⏭ next |
+| **S3** | Run that task **many times** on GLM-4.6 and hand-read the trajectories. **Result:** 20/20 — no *natural* gap (kill-trigger 1). Pivot (a *sequence*, not a fork): inject deterministic mechanical faults as the **foundation/floor** (a *controlled fault-recovery testbed*), then later tune harder for a **natural-gap stretch** that reuses the same harness + guardrails (DECISIONS D12). | Proves whether a gap exists and is the *fixable* kind — here the floor is manufactured honestly, with a natural gap as the stretch. Confirmed: rate-0.5 injection → 80% baseline, all-mechanical. | ✅ done |
 | **S4** | The **ablation runner**: automate N trials per "arm" and compute proper confidence intervals (Wilson per arm + Newcombe on the difference). | Turns one-off runs into a *measurement* with error bars. | ⬜ planned |
 | **S5–S12** | Layer the **guardrails** one at a time (retry-nudge, error-recovery), optionally inject faults, and draw the **gap-closure chart**. | The actual deliverable: how much each guardrail closes the gap. | ⬜ planned |
 
@@ -21,10 +21,24 @@ Stages are labelled **S0, S1, S2, …** — each is roughly one build session.
 > primitive — here's the narrow, measured delta,"* never *"I invented this."* If a gap is
 > manufactured by injecting faults rather than found naturally, the README/writeup says so.
 
-**Where we are right now:** S2 just merged (PR #1). The scenario grades a single GLM run
-PASS/FAIL. Next is S3 — turning one run into a *rate* across many runs, against a stronger model.
+**Where we are right now:** the S3 diagnostic is done — **GLM-4.6 scored 20/20 (100%)** on the
+as-built task, verified genuine (every win used both lookups in the minimal 3 turns; none guessed).
+A 100% baseline has nothing for a guardrail to recover, so there's **no natural gap** — the
+pre-registered **kill-trigger 1**. Per the plan we don't build guardrails against a non-existent
+gap. Instead we treat the two contingencies as a **sequence, not a fork**: **first** inject
+deterministic mechanical faults (503-style tool errors) as the **foundation** — a guaranteed,
+reproducible gap that also serves as the dev fixture for building the guardrails (the deliverable
+**floor**: a *controlled fault-recovery testbed*, stated plainly). **Then**, as a **stretch**, tune
+the scenario harder to surface GLM's *own* mechanical failures and re-run the same validated
+guardrails for the stronger 'natural gap' result — the harness + mechanisms are shared, only the
+fault layer toggles off (DECISIONS D12). The frontier (Claude Sonnet) arm was skipped as moot
+(~100%). **Re-diagnosis result:** the injector (`faults.py`) + runner wiring are built and
+offline-proven, and the GLM baseline under rate-0.5 injection scored **16/20 = 80%** (vs 100%
+clean) — an injected gap that's 100% *mechanical* (all 4 misses are `max_steps` retry-exhaustion)
+and recoverable (DECISIONS D13). Confirmed but mild; making it crisp (CIs vs the coming mechanism
+arm) is S4–S6 tuning. **Next: S4** builds the error-recovery mechanism arm + Wilson CIs.
 
-> **S3 watch-out (a real risk to the thesis):** today's single run passed on the first try with
-> the steps spelled out. If GLM-4.6 turns out to pass ≳85% of the time, there's no gap big enough
-> to measure — at which point we make the task harder or inject faults, and **say so plainly**
-> rather than pretend a gap exists.
+> **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
+> natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say
+> so plainly**, now as the *foundation* with a tuned natural gap kept as a *stretch* on top
+> (DECISIONS D12) — rather than pretend a natural gap exists.
