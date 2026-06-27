@@ -12,7 +12,7 @@ Stages are labelled **S0, S1, S2, …** — each is roughly one build session.
 | **S1** | The bare **reason → act → observe** loop (`agent.py`): ask the model what to do, run the tool it asks for, feed the result back, repeat. **Zero** reliability features. | "Build the ugliest working version first." You need a no-help baseline before you can measure how much *any* help adds. | ✅ done |
 | **S2** | Swaps the placeholder task for the **real** one: look up an order, look up its zone's shipping rate (a *chained* lookup), add them, submit the total — graded against the known answer (158) by a deterministic **oracle**, never another AI. | Gives the project a real task whose failures are *mechanical* ("called the wrong tool"), not *cognitive* ("bad at math") — the distinction the whole thesis rests on. | ✅ done |
 | **S3** | Run that task **many times** on GLM-4.6 and hand-read the trajectories. **Result:** 20/20 — no *natural* gap (kill-trigger 1). Pivot (a *sequence*, not a fork): inject deterministic mechanical faults as the **foundation/floor** (a *controlled fault-recovery testbed*), then later tune harder for a **natural-gap stretch** that reuses the same harness + guardrails (DECISIONS D12). | Proves whether a gap exists and is the *fixable* kind — here the floor is manufactured honestly, with a natural gap as the stretch. Confirmed: rate-0.5 injection → 80% baseline, all-mechanical. | ✅ done |
-| **S4** | The **first mechanism arm + the ablation runner**: add a toggleable **error-recovery** guardrail (the harness silently retries a transient tool fault, spending *no* model turn), then run **two arms** — baseline vs +error-recovery — over the *same* injected faults and compute proper confidence intervals (Wilson per arm + Newcombe on the gap between them). | Turns one-off runs into a *measurement of a difference*: the gap-closure number, with honest error bars instead of a bare k/N. | 🚧 code built + offline-green; live measurement pending an API key |
+| **S4** | The **first mechanism arm + the ablation runner**: add a toggleable **error-recovery** guardrail (the harness silently retries a transient tool fault, spending *no* model turn), then run **two arms** — baseline vs +error-recovery — over the *same* injected faults and compute proper confidence intervals (Wilson per arm + Newcombe on the gap between them). | Turns one-off runs into a *measurement of a difference*: the gap-closure number, with honest error bars instead of a bare k/N. | ✅ done — **measured**: 67.5% → 100%, **+32.5%** (Newcombe 95% CI [+17.3%, +48.0%]) at rate 0.6, N=40 |
 | **S5–S12** | Layer the **remaining guardrails** (e.g. retry-nudge) one at a time, optionally inject faults, and draw the **gap-closure chart** across arms. | The actual deliverable: how much each guardrail closes the gap. | ⬜ planned |
 
 *(forge-gap runs **S0 → ~S12**; S5–S12 layer one mechanism at a time and then build the chart — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
@@ -38,15 +38,17 @@ clean) — an injected gap that's 100% *mechanical* (all 4 misses are `max_steps
 and recoverable (DECISIONS D13). Confirmed but mild; making it crisp (CIs vs the mechanism arm) is
 what S4 builds.
 
-**S4 status — machinery built, measurement pending.** The S4 code is now built and offline-proven:
-the **error-recovery** guardrail (a harness-level retry, added as a `recover` toggle on the loop —
-it silently re-tries a transient tool fault *without* spending a model turn), the **Wilson +
-Newcombe** confidence intervals (`stats.py`), and the **two-arm ablation harness** (`ablation.py`)
-that runs baseline vs +error-recovery over *identical* seeded faults and prints the gap-closure
-delta with a straddles-zero / clears-zero verdict. All six offline test suites are green. **What's
-left:** the one *live* N-trial measurement — it needs `OPENROUTER_API_KEY`, which isn't in the build
-environment — at the recommended operating point **fault-rate 0.6, N=40 distinct seeds**, producing
-the actual measured delta + CIs. The choices behind this stage are DECISIONS D14–D16.
+**S4 done — the gap is real, and error-recovery closes it.** Built *and measured*: the
+**error-recovery** guardrail (a harness-level `recover` toggle on the loop — it silently re-tries a
+transient tool fault *without* spending a model turn), the **Wilson + Newcombe** confidence intervals
+(`stats.py`), and the **two-arm ablation harness** (`ablation.py`). The live run at **rate 0.6, N=40
+distinct seeds** (GLM-4.6): **baseline 27/40 = 67.5%** (Wilson 95% CI [52.0%, 79.9%]; all 13 misses
+were `max_steps` retry-exhaustion) vs **+error-recovery 40/40 = 100%** (Wilson 95% CI [91.2%, 100%];
+the harness absorbed **104** transient 503s, spending no model turns). **Gap closed: +32.5%, Newcombe
+95% CI [+17.3%, +48.0%]** — the interval clears 0 *and* the two Wilson bars don't overlap, so it's a
+real result by our honesty rule. All six offline suites stay green. The choices + measured result are
+DECISIONS D14–D17. **Next (S5+):** add retry-nudge as a second arm and draw the gap-closure chart;
+the **natural-gap stretch** (D12) remains the bigger prize.
 
 > **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
 > natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say

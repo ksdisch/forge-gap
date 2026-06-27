@@ -242,11 +242,13 @@ With deterministic per-trial seeds, completion is dominated by the fault *patter
   (the retry logic + an end-to-end loop run driven by a fake model), `test_ablation.py` (the two-arm
   plumbing). All offline, all green.
 
-**Status — the measured number is still pending.** Everything above is built and offline-proven, but
-the *actual* gap-closure result isn't in yet: the live N-trial run needs a real `OPENROUTER_API_KEY`,
-which the build environment didn't have. The recommended run is `uv run ablation.py z-ai/glm-4.6 40
-0.6` (DECISIONS D15). Until it runs, S4 stays 🚧 in the roadmap — we don't write down a result we
-haven't measured.
+**The measured result.** The live run (`uv run ablation.py z-ai/glm-4.6 40 0.6`, GLM-4.6):
+**baseline 27/40 = 67.5%** (Wilson 95% CI [52.0%, 79.9%]; all 13 misses were `max_steps`
+retry-exhaustion) vs **+error-recovery 40/40 = 100%** (Wilson 95% CI [91.2%, 100%]; the harness
+silently absorbed **104** transient 503s, spending no model turns). **Gap closed: +32.5%, Newcombe
+95% CI [+17.3%, +48.0%]** — the interval clears 0 *and* the two Wilson bars don't overlap, so it's a
+*real* result by our honesty rule, not a coincidence of small N. (See DECISIONS D17.) Note 100% is a
+boundary: the honest read of the mechanism arm is its Wilson floor (91.2%), not "certainly perfect."
 
 **Teaching note.** Two ideas worth keeping. **(1) Put the cost of a retry where it doesn't hurt.** The
 bare loop *already* retries — the model re-calls the broken tool — but every retry eats a scarce

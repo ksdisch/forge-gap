@@ -258,3 +258,24 @@ it just means "what we decided and why, written down so future-you isn't confuse
   range for the *difference* of two rates. *point estimate* = the single best-guess number (here the
   raw delta) before error bars. *straddles zero* = the difference interval includes 0, so you can't
   tell the two arms apart.
+
+## D17 — S4 measured result: error-recovery closes the injected gap (a real result by the CI gate) ⭐
+- **The result:** the live ablation on GLM-4.6 at **rate 0.6, N=40 distinct seeds** —
+  **baseline 27/40 = 67.5%** (Wilson 95% CI [52.0%, 79.9%]) vs **+error-recovery 40/40 = 100%**
+  (Wilson 95% CI [91.2%, 100%]). **Gap closed: +32.5%**, **Newcombe 95% CI [+17.3%, +48.0%]**. The
+  error-recovery arm absorbed **104** transient 503s at the harness level, spending zero model turns.
+- **Why we may call it a result (not over-claimed):** the Newcombe interval on the *difference* clears
+  0, *and* the two arms' Wilson bars don't overlap (79.9% < 91.2%) — both honesty checks pass (D7/D16).
+  100% is a boundary, so the *honest* read of the mechanism arm is its Wilson lower bound (91.2%), not
+  "certainly perfect"; that's exactly what the interval is for.
+- **The mechanism story, confirmed:** baseline's 13 misses were **all** `max_steps` — the bare loop's
+  only recovery is the *model* re-calling a 503'd tool, which burns its 6-turn budget (retry-
+  exhaustion). Error-recovery retries at the *harness* level (`max_recoveries=3`) without spending a
+  turn, so all 13 are rescued. This validates D14's bet: error-recovery — not retry-nudge — is the
+  guardrail that moves *this* number.
+- **Honesty caveat (load-bearing):** the gap is **injected** (a controlled fault-recovery testbed, the
+  rate a published knob). This measures recovery of a clean transient-fault *subset* of failures; the
+  **natural-gap stretch** (D12) — eliciting GLM's *own* mechanical failures on a harder task and
+  re-running the same guardrail — remains future work and would show how much of GLM's real failure
+  surface error-recovery covers.
+- **Reproduce:** `uv run ablation.py z-ai/glm-4.6 40 0.6` (writes `runs/ablation-summary.json`).
