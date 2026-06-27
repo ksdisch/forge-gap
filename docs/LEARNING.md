@@ -159,6 +159,62 @@ The run stops as `no_submit` (or `max_steps`); the oracle sees no number and gra
 
 ---
 
+## S3 — Does a gap even exist? (kill-trigger, then inject)
+
+**What we built.** The diagnostic that decides whether the whole thesis is worth building.
+
+- `runner.py` — the **N-trial runner**: run the scenario many times for one **arm** (a configuration
+  under test — here, one model) and report the raw **completion rate** (k/N), keeping every trajectory.
+- We ran the GLM baseline: **20/20 = 100%** on the clean task — verified genuine (every win used both
+  lookups in 3 turns; none guessed). A 100% baseline has *nothing* for a guardrail to recover, so
+  **no natural gap exists** — the pre-registered **kill-trigger 1** fired.
+- Rather than fake a gap, we **injected one honestly**: `faults.py` wraps the lookup tools to raise a
+  deterministic, seeded **transient 503 error** at a set rate (`with_faults`). Re-diagnosing the
+  baseline under rate-0.5 injection: **16/20 = 80%**. All 4 misses were `max_steps` — GLM persistently
+  retried the 503'd tool, but each retry burned a turn against its 6-step budget. (See `DECISIONS.md`
+  D12 + D13.)
+
+**Teaching note.** Two ideas worth keeping. **(1) A pre-registered kill-trigger saves you from fooling
+yourself.** We'd written down, in advance, "if GLM already passes ≳85%, don't build guardrails." When
+it scored 20/20 we *honored* that, instead of rationalising a mechanism onto a gap that wasn't there.
+**(2) When the natural gap doesn't reproduce, injecting faults is a legitimate pivot — if you say so
+plainly.** We didn't pretend GLM is bad at the task; we built a *controlled fault-recovery testbed* (the
+floor) and kept a tuned natural gap as a stretch. The injected fault also reveals the mechanism *lever*:
+the bare loop's only recovery is the **model** retrying, which **eats its turn budget**; the coming
+error-recovery guardrail retries at the **harness** level, transparently — so it rescues exactly these
+`max_steps` failures.
+
+**New words.** *arm*, *completion rate*, *fault injection*, *transient (503) error*, *kill-trigger*,
+*controlled testbed*, *retry-exhaustion*.
+
+**Recall — try before you reveal:**
+
+Q1. GLM scored 20/20 on the clean task. Why was that *bad* news, and what did we do about it?
+
+<details><summary>answer</summary>
+
+A 100% baseline leaves no room for a guardrail to show a measurable lift — there's no gap to close (kill-trigger 1). Per the pre-commitment we did NOT build mechanisms; we injected deterministic mechanical faults (503s) to create a recoverable gap honestly, and reframed the headline to a "controlled fault-recovery testbed."
+
+</details>
+
+Q2. Under rate-0.5 injection the baseline dropped to 80%, and all 4 failures were `max_steps`. Why does a single failing trial fail?
+
+<details><summary>answer</summary>
+
+The tool 503s; the bare loop feeds the error back and GLM retries the call — but each retry consumes one of its 6 reasoning turns. When a trial's fault pattern needs more successful calls than the budget allows (e.g. seed 4: `get_order` 503'd all six turns), it runs out of steps with no answer → `max_steps`. It's *retry-exhaustion*: mechanical and recoverable (a harness-level retry that doesn't cost model turns would rescue it).
+
+</details>
+
+Q3. Both N=20 runs failed the *same* seeds {4, 9, 16, 18}. What does that tell us, and how do we get more statistical power?
+
+<details><summary>answer</summary>
+
+With deterministic per-trial seeds, completion is dominated by the fault *pattern*, not GLM's randomness — so "N" is the number of *distinct* seeds. Re-running the same 20 seeds is reproducibility, not more data (don't pool into "N=40"). For power: more distinct seeds (toward N=50) and/or a higher fault rate for a bigger gap.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -185,3 +241,10 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **guardrail / mechanism** — a reliability feature added on top of the baseline (retry-nudge, error-recovery).
 - **proportion / confidence interval** — success is a fraction of N runs; a CI is the honest range the true rate likely sits in (we'll use Wilson + Newcombe). *(arrives with S4)*
 - **ablation** — turning one factor on/off (here, a guardrail) to measure its specific effect. *(arrives with S4)*
+- **arm** — one configuration under test in a run (here, one model; later "+retry" vs "baseline" are arms).
+- **completion rate** — the fraction of trials that finish correctly (k/N); the project's headline number.
+- **fault injection** — deliberately, reproducibly making a tool fail sometimes (a seeded 503) so there's a recoverable failure to measure guardrails against.
+- **transient (503) error** — a tool failure that may succeed if you simply retry it.
+- **kill-trigger** — a pre-agreed "stop and change course" condition, fixed in advance so a result you don't like can't be rationalised away.
+- **controlled testbed** — measuring guardrails against faults you injected on purpose (and disclose), rather than a naturally-occurring gap.
+- **retry-exhaustion** — failing because retries (each costing a turn) used up the step budget before the task could finish.
