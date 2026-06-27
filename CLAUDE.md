@@ -22,20 +22,32 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `glm.py` — the minimal GLM-via-OpenRouter client (`chat()`, `MODEL`). The foundation
   everything builds on. Forwards `tools` / `tool_choice` / `temperature` straight through.
 - `agent.py` — the scenario-agnostic reason→act→observe loop + deterministic grading. ZERO
-  mechanisms (the bare baseline). Pure `dispatch()`; per-step JSONL trajectory plus a `grade` event.
+  mechanisms *by default* (the bare baseline); S4 added one opt-in `recover` toggle (error-recovery:
+  a harness-level retry of transient faults) that stays off unless an arm turns it on. Pure
+  `dispatch()` + `dispatch_with_recovery()`; per-step JSONL trajectory plus a `grade` event.
 - `scenario.py` — the S2 lookup-then-compute task as data: a frozen `Scenario` (two chained
   lookup tools + a `submit_answer` terminal tool + known ground truth).
 - `oracle.py` — the deterministic grader (`grade()`): computed value vs known ground truth,
   never an LLM judge. Pure and unit-tested.
 - `verify.py` — smoke test proving chat + tool-calling work.
 - `test_oracle.py` — offline unit tests for the oracle, scenario ground truth, and `dispatch`.
+- `faults.py` — S3 deterministic mechanical-fault injector (`with_faults`): wraps a Scenario's
+  lookup tools to raise seeded transient 503s at a set rate. Non-mutating; `rate=0` ≡ clean task.
+- `runner.py` — the S3 N-trial runner (`run_arm`): loops one arm N times, reports raw k/N. S4 added a
+  `run_kwargs` passthrough so an arm can toggle a mechanism (e.g. `{"recover": True}`).
+- `stats.py` — S4 proportion CIs: `wilson` (per arm), `newcombe_diff` (the gap between arms),
+  `excludes_zero` (the honesty gate). Pure, unit-tested.
+- `ablation.py` — the S4 two-arm ablation harness: runs baseline vs +error-recovery over *identical*
+  seeded faults and prints the gap-closure delta with Wilson + Newcombe CIs and a verdict.
 - `check_docs.py` — freshness check for the learning spine: flags any done stage missing from
   `docs/LEARNING.md`. Run `uv run check_docs.py`. A smoke alarm, not a commit gate.
+- `test_*.py` — offline, network-free suites (oracle, faults, runner, stats, recover, ablation),
+  each runnable with `uv run test_<name>.py`.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
 - `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
   why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
   `/wrap` recaps). Start here to catch up; see `docs/README.md`.
-- *(planned)* the N-trial ablation runner and the gap-closure chart.
+- *(planned)* the **gap-closure chart** across arms (the final figure) + further guardrails (retry-nudge).
 
 ## Methodology guardrails (load-bearing — do not drift)
 - **Deterministic oracle, never an LLM judge.** Task success is measured against known

@@ -138,6 +138,30 @@ def test_make_scenario() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_run_kwargs_passthrough() -> None:
+    """run_kwargs reach run_fn verbatim (the S4 seam for toggling a mechanism on one arm)."""
+    print("run_arm — run_kwargs forwarded to the per-trial driver")
+    tmp = tempfile.mkdtemp()
+    try:
+        seen = []
+
+        def fake(*, scenario=None, model=None, out_path=None, temperature=None, **kwargs):
+            seen.append(kwargs)
+            return {"correct": True, "stop": "submitted", "submitted": 158, "recoveries": kwargs.get("recover") and 3 or 0}
+
+        arm = run_arm("mech", "m", 2, run_fn=fake, run_kwargs={"recover": True},
+                      runs_dir=tmp, verbose=False)
+        check("recover=True forwarded to every trial", all(k.get("recover") is True for k in seen))
+        check("recoveries aggregated from summaries", arm["recoveries"] == 6)
+
+        # default: no run_kwargs -> driver called with no extras (S3 behaviour unchanged)
+        seen.clear()
+        run_arm("bare", "m", 2, run_fn=fake, runs_dir=tmp, verbose=False)
+        check("no run_kwargs -> no extra kwargs passed", all(k == {} for k in seen))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     print("Offline tests: the S3 N-trial runner\n" + "-" * 44)
     test_aggregation()
@@ -145,6 +169,8 @@ def main() -> int:
     test_stop_tally_and_edges()
     print()
     test_make_scenario()
+    print()
+    test_run_kwargs_passthrough()
     print("\n" + "-" * 44)
     if _failures:
         print(f"{len(_failures)} check(s) FAILED:")
