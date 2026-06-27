@@ -27,6 +27,10 @@ Every stage (each "S") follows the same beat — the rules live in the project [
 
 Your existing `/begin` reads this spine at the start of a session; `/wrap` updates it at the end.
 
+**Safety net.** Run `uv run check_docs.py` anytime (it's also part of each stage's definition of
+done): it flags any stage marked done in `ROADMAP.md` that's missing from `LEARNING.md`, so drift
+gets caught even if the rhythm slips. It's a smoke alarm, not a blocker.
+
 ## The standing rule
 
 Everything here is written **for someone sharp but new to the jargon** — plain English, every
