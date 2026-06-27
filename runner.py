@@ -47,30 +47,35 @@ def run_arm(
     scenario: Scenario = ORDER_SCENARIO,
     make_scenario=None,
     run_fn=agent_run,
+    run_kwargs: dict | None = None,
     runs_dir: str = "runs",
     temperature: float = TEMPERATURE,
     verbose: bool = True,
 ) -> dict:
     """Run `scenario` `n` times on one model `arm`; return its completion rate + bookkeeping.
 
-    ZERO mechanisms: this only loops the bare agent and tallies what the deterministic oracle
-    already decided per run. `make_scenario(i)`, if given, builds a fresh scenario per trial i
-    (used to inject per-trial seeded faults — DECISIONS D12); otherwise the fixed `scenario` is
-    used every trial. `run_fn` is the per-trial driver (defaults to the real `agent.run`; tests
-    inject a fake so the k/N counting can be verified without any API calls).
+    The arm's tally is whatever the deterministic oracle already decided per run. `make_scenario(i)`,
+    if given, builds a fresh scenario per trial i (used to inject per-trial seeded faults —
+    DECISIONS D12); otherwise the fixed `scenario` is used every trial. `run_kwargs` are extra
+    keyword args forwarded verbatim to `run_fn` — this is the seam the S4 ablation uses to toggle a
+    mechanism on for one arm (e.g. `{"recover": True}`) while leaving the baseline arm bare; an
+    empty/None default keeps the S3 behaviour byte-identical. `run_fn` is the per-trial driver
+    (defaults to the real `agent.run`; tests inject a fake so the k/N counting can be verified
+    without any API calls).
     """
     arm_dir = os.path.join(runs_dir, label)
     os.makedirs(arm_dir, exist_ok=True)
+    rk = run_kwargs or {}
 
     if verbose:
-        print(f"[{label}] model={model}  n={n}  temp={temperature}")
+        print(f"[{label}] model={model}  n={n}  temp={temperature}  run_kwargs={rk}")
 
     trials: list[dict] = []
     for i in range(n):
         scen = make_scenario(i) if make_scenario is not None else scenario
         out_path = os.path.join(arm_dir, f"trial-{i:02d}.jsonl")
         summary = run_fn(scenario=scen, model=model,
-                         out_path=out_path, temperature=temperature)
+                         out_path=out_path, temperature=temperature, **rk)
         trials.append(summary)
         if verbose:
             mark = "ok  " if summary["correct"] else "MISS"
@@ -82,6 +87,7 @@ def run_arm(
     by_stop = dict(Counter(t["stop"] for t in trials))
     tok_prompt = sum((t.get("tokens") or {}).get("prompt", 0) for t in trials)
     tok_completion = sum((t.get("tokens") or {}).get("completion", 0) for t in trials)
+    recoveries = sum(t.get("recoveries", 0) for t in trials)  # harness retries this arm absorbed
 
     results_path = os.path.join(arm_dir, "results.jsonl")
     with open(results_path, "w", encoding="utf-8") as f:
@@ -100,6 +106,7 @@ def run_arm(
         "correct": correct,
         "rate": rate,
         "by_stop": by_stop,
+        "recoveries": recoveries,
         "tokens": {"prompt": tok_prompt, "completion": tok_completion},
         "results_path": results_path,
         "trials": trials,

@@ -50,6 +50,9 @@ from scenario import ORDER_SCENARIO, Scenario
 
 # --- config ---------------------------------------------------------------
 MAX_STEPS = 6        # generous; the happy path resolves in ~3 reasoning turns.
+MAX_RECOVERIES = 3   # error-recovery arm only: how many times the HARNESS may transparently
+                     # retry a transient tool failure within ONE act step (no model turn spent).
+                     # Ignored by the bare baseline, whose run() default is recover=False.
 TEMPERATURE = 0.7    # Non-zero on purpose. We never fake determinism via temp 0 —
                      # GLM is stochastic regardless; signal comes from N, not temp.
                      # We always record the temperature we used (see the run header).
@@ -78,6 +81,45 @@ def dispatch(name: str, args: dict, registry: dict) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
+# --- error-recovery: the S4 mechanism (a harness-level retry) --------------
+# Transient/5xx-style signals worth a silent retry. We classify the *observation string* that
+# dispatch already returns — NOT an exception type — so the core loop stays decoupled from any
+# specific tool or fault module: the same predicate catches a real OpenRouter 503/429 and our
+# injected ToolUnavailable alike. (Stringly-typed on purpose; HTTP status signalling already is.)
+_RETRYABLE_HINTS = (
+    "503", "temporarily unavailable", "toolunavailable",
+    "timed out", "timeout", "429", "rate limit", "try again", "retry",
+)
+
+
+def _is_retryable(error: str) -> bool:
+    """True if `error` looks like a transient failure a simple retry might clear."""
+    e = error.lower()
+    return any(hint in e for hint in _RETRYABLE_HINTS)
+
+
+def dispatch_with_recovery(
+    name: str, args: dict, registry: dict, *, recover: bool, max_recoveries: int
+) -> tuple[bool, str, int]:
+    """Dispatch `name`; if `recover`, transparently retry *transient* failures in-place.
+
+    This is **error-recovery**, S4's first guardrail. The load-bearing contrast with the bare
+    loop: a retry here happens INSIDE one act step, so it does NOT cost the model a reasoning
+    turn. The bare baseline instead feeds the error back, and the model must spend a whole turn
+    re-calling the tool itself — under heavy faults that exhausts the step budget (S3's `max_steps`
+    misses). Only *retryable* errors are retried: a malformed call or an unknown-id KeyError is
+    permanent, so re-calling it identically would just burn retries (those want retry-nudge or
+    validation — different guardrails). Returns (ok, result_or_error, recoveries_used).
+    """
+    ok, result = dispatch(name, args, registry)
+    recoveries = 0
+    if recover:
+        while (not ok) and _is_retryable(result) and recoveries < max_recoveries:
+            recoveries += 1
+            ok, result = dispatch(name, args, registry)
+    return ok, result, recoveries
+
+
 # --- the loop -------------------------------------------------------------
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -89,14 +131,25 @@ def run(
     model: str | None = None,
     max_steps: int = MAX_STEPS,
     temperature: float = TEMPERATURE,
+    recover: bool = False,
+    max_recoveries: int = MAX_RECOVERIES,
     out_path: str = TRAJECTORY_PATH,
 ) -> dict:
     """Run one reason->act->observe loop to completion, then grade it.
 
     `model` overrides which model the loop calls (default: the env/`MODEL` default). That single
     knob is what lets one runner drive a GLM arm and a frontier arm through the *same* loop — the
-    machinery is identical; only the model swaps. Returns a small summary dict (the oracle's
-    correct/submitted/expected plus the model used); writes the full trajectory to `out_path`.
+    machinery is identical; only the model swaps.
+
+    `recover` toggles the S4 **error-recovery** mechanism: when True, a transient tool failure is
+    retried at the harness level (up to `max_recoveries` times) inside the same step, WITHOUT
+    spending a model turn. `recover=False` is the bare baseline — behaviour is byte-identical to
+    S3 (it just dispatches once and feeds any error back). This toggle is the "arm": baseline vs
+    +error-recovery, the two configurations the S4 ablation compares (DECISIONS D8/D11 — the
+    mechanism wraps the LOOP, never the task; the `Scenario` stays fixed).
+
+    Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and
+    how many harness-level recoveries fired); writes the full trajectory to `out_path`.
     """
     resolved_model = model or MODEL
     messages = [
@@ -111,6 +164,7 @@ def run(
     log({
         "event": "run", "ts": _now(), "model": resolved_model, "scenario": scenario.name,
         "temperature": temperature, "max_steps": max_steps, "max_tokens": MAX_TOKENS,
+        "recover": recover, "max_recoveries": max_recoveries,
         "task": scenario.task,
         "ground_truth": scenario.ground_truth,
     })
@@ -119,6 +173,7 @@ def run(
     final_answer = None
     submitted = None          # the value GLM passed to submit_answer (None if it never did)
     prompt_tokens = completion_tokens = 0
+    total_recoveries = 0      # harness-level retries the error-recovery arm absorbed this run
 
     for step in range(max_steps):
         resp = chat(messages, model=resolved_model, tools=scenario.tools,
@@ -185,15 +240,20 @@ def run(
                 stop, final_answer, terminated = "submitted", submitted, True
                 break
 
-            # ACT — dispatch the tool (or record why we couldn't).
+            # ACT — dispatch the tool (or record why we couldn't). With error-recovery on, a
+            # transient failure is retried HERE, transparently, never spending a model turn.
             if not args_ok:
-                ok, result = False, f"malformed JSON arguments: {c.function.arguments!r}"
+                ok, result, recoveries = (
+                    False, f"malformed JSON arguments: {c.function.arguments!r}", 0)
             else:
-                ok, result = dispatch(c.function.name, args, scenario.registry)
+                ok, result, recoveries = dispatch_with_recovery(
+                    c.function.name, args, scenario.registry,
+                    recover=recover, max_recoveries=max_recoveries)
+            total_recoveries += recoveries
             log({
                 "event": "act", "step": step, "tool_call_id": c.id,
                 "tool": c.function.name, "args": args,
-                "args_ok": args_ok, "dispatch_ok": ok,
+                "args_ok": args_ok, "dispatch_ok": ok, "recoveries": recoveries,
             })
 
             # OBSERVE — feed the outcome (result OR error) back to GLM verbatim.
@@ -206,7 +266,8 @@ def run(
 
     # GRADE — the deterministic oracle has the final word (never an LLM).
     correct, detail = grade(submitted, scenario.ground_truth)
-    log({"event": "final", "step": step, "stop": stop, "answer": final_answer})
+    log({"event": "final", "step": step, "stop": stop, "answer": final_answer,
+         "recoveries": total_recoveries})
     log({
         "event": "grade", "submitted": submitted, "expected": scenario.ground_truth,
         "correct": correct, "reason": detail["reason"], "stop": stop,
@@ -225,6 +286,8 @@ def run(
         "expected": scenario.ground_truth,
         "final_answer": final_answer,
         "reasoning_turns": sum(1 for r in records if r["event"] == "reason"),
+        "recover": recover,
+        "recoveries": total_recoveries,
         "tokens": {"prompt": prompt_tokens, "completion": completion_tokens},
         "trajectory": out_path,
         "records": len(records),
@@ -240,6 +303,7 @@ def main() -> int:
     print("-" * 60)
     print(f"stop           : {s['stop']}")
     print(f"reasoning turns: {s['reasoning_turns']}")
+    print(f"recoveries     : {s['recoveries']}  (recover={s['recover']})")
     print(f"submitted      : {s['submitted']!r}   expected: {s['expected']!r}")
     print(f"oracle         : {verdict}")
     print(f"tokens         : prompt={s['tokens']['prompt']} "

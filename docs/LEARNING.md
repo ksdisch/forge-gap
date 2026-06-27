@@ -215,6 +215,84 @@ With deterministic per-trial seeds, completion is dominated by the fault *patter
 
 ---
 
+## S4 — The first guardrail (error-recovery) + confidence intervals
+
+**What we built.** S4 turns "run one arm, eyeball k/N" into "compare two arms and report the
+*difference*, with honest error bars." Four pieces:
+
+- **`agent.py` grew one toggle — `recover`.** This is the **error-recovery** guardrail. When a tool
+  call hits a transient fault (a 503-style "temporarily unavailable"), the *harness* quietly retries
+  it **inside the same step**, up to `max_recoveries` times, **without** spending one of the model's
+  reasoning turns. `recover=False` is the bare baseline from S1/S3 — byte-for-byte unchanged. The
+  contrast is the whole point: in the baseline the model itself has to notice the error and re-call
+  the tool, burning a turn each time (that's how S3's runs died at `max_steps`); error-recovery makes
+  the retry free of turns. It retries only *transient* errors — a malformed call or an unknown-id
+  error is permanent, so re-calling it identically would just waste attempts (those want a different
+  guardrail).
+- **`stats.py` — the honest rulers.** `wilson(k, n)` gives one arm's rate a **Wilson interval** (the
+  believable range for the true rate given only n tries; it behaves at the 0%/100% edges, where the
+  textbook mean ± std interval falls apart and can even point outside 0–100%). `newcombe_diff(...)`
+  gives the **difference** between two arms its own interval. `excludes_zero(lo, hi)` is the gate: if
+  the difference interval includes 0, we are *not allowed* to call it a win.
+- **`ablation.py` — the two-arm harness.** Runs **baseline** and **+error-recovery** over the *same*
+  injected faults (trial i uses the same `seed=i` for both arms — a **paired** comparison), then
+  prints each arm's rate + Wilson interval, the gap between them + Newcombe interval, and a one-line
+  verdict: a real result (interval clears 0) or "not a result" (it straddles 0).
+- **Tests for all of it** — `test_stats.py` (CI math pinned to hand-computed values), `test_recover.py`
+  (the retry logic + an end-to-end loop run driven by a fake model), `test_ablation.py` (the two-arm
+  plumbing). All offline, all green.
+
+**Status — the measured number is still pending.** Everything above is built and offline-proven, but
+the *actual* gap-closure result isn't in yet: the live N-trial run needs a real `OPENROUTER_API_KEY`,
+which the build environment didn't have. The recommended run is `uv run ablation.py z-ai/glm-4.6 40
+0.6` (DECISIONS D15). Until it runs, S4 stays 🚧 in the roadmap — we don't write down a result we
+haven't measured.
+
+**Teaching note.** Two ideas worth keeping. **(1) Put the cost of a retry where it doesn't hurt.** The
+bare loop *already* retries — the model re-calls the broken tool — but every retry eats a scarce
+reasoning turn, and under heavy faults that's exactly what kills the run. Error-recovery doesn't add
+retrying; it *moves* it to the harness, where a retry costs no turn. The lesson generalises: often the
+fix isn't "do a new thing," it's "do the same thing somewhere cheaper." **(2) A difference needs its
+own error bar.** It's tempting to draw two rate bars and check whether they overlap — but the thing
+we're claiming is the *gap*, a single quantity, so it gets its own interval (Newcombe). If that
+interval straddles 0, the gap could be nothing, and we say so. That honesty gate is the line between a
+*measurement* and a marketing number.
+
+**New words.** *error-recovery*, *retry-nudge*, *harness-level retry*, *Wilson interval*, *Newcombe
+interval*, *point estimate*, *straddles zero / excludes zero*, *ablation*, *arm-as-config*, *paired
+comparison*.
+
+**Recall — try before you reveal:**
+
+Q1. The baseline loop already retries a 503'd tool (the model re-calls it). So what does
+error-recovery actually *change*, and why does that rescue S3's `max_steps` failures?
+
+<details><summary>answer</summary>
+
+It moves the retry from the *model* to the *harness*. In the baseline each retry is a fresh model turn (the model sees the error, then decides to re-call), so a burst of 503s burns through the 6-turn budget and the run dies as `max_steps`. Error-recovery retries the call *inside the same step*, spending no model turn — so transient faults get absorbed before they can exhaust the budget. Same retrying, cheaper place.
+
+</details>
+
+Q2. Why report a **Newcombe interval on the difference** instead of just drawing the two arms' Wilson
+bars and seeing whether they overlap?
+
+<details><summary>answer</summary>
+
+The thing we're claiming is the *gap* — one number — so it needs its own uncertainty. Two Wilson bars that merely touch or barely overlap don't cleanly answer "could the true gap be zero?": non-overlapping bars are sufficient to declare a difference but not necessary, so eyeballing overlap can hide a real effect (or a null). Newcombe builds the interval *for the difference itself*; if it includes 0 we report "no clear effect" — the honest gate (D7/D16).
+
+</details>
+
+Q3. Both arms run trial i with the same `seed=i`. Why pair them like that, and what does pairing
+*not* fix?
+
+<details><summary>answer</summary>
+
+Pairing means both arms face the *identical* fault pattern on trial i, so the gap between them can't be an artifact of one arm simply drawing easier faults — it isolates the mechanism's effect. What it doesn't fix: GLM is still stochastic, so the two arms may make different numbers of tool calls and land on different draws within that pattern. That residual randomness is real — which is exactly why we still need N *distinct* seeds and confidence intervals, not a single paired run.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -239,9 +317,19 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **cognitive failure** — the model genuinely couldn't reason the answer out — not what this project targets.
 - **baseline** — the no-help version you measure improvements against (S1's bare loop).
 - **guardrail / mechanism** — a reliability feature added on top of the baseline (retry-nudge, error-recovery).
-- **proportion / confidence interval** — success is a fraction of N runs; a CI is the honest range the true rate likely sits in (we'll use Wilson + Newcombe). *(arrives with S4)*
-- **ablation** — turning one factor on/off (here, a guardrail) to measure its specific effect. *(arrives with S4)*
-- **arm** — one configuration under test in a run (here, one model; later "+retry" vs "baseline" are arms).
+- **proportion / confidence interval** — success is a *proportion* (k of N); a CI is the honest range the true rate likely sits in. Built in S4: **Wilson** per arm, **Newcombe** on the difference (`stats.py`).
+- **ablation** — turning one factor on/off (here, the error-recovery guardrail) while holding everything else fixed, to measure that one factor's effect. Built in S4 (`ablation.py`).
+- **arm** — one configuration under test in a run (a model, or baseline vs +error-recovery). In S4 an arm is *config* — `{label, run_kwargs}` — so the harness can drive several through one loop.
+- **arm-as-config** — representing an arm as data (a label + the kwargs that toggle its mechanism) rather than hard-coding it, so adding an arm is a list entry, not a rewrite.
+- **error-recovery** — the S4 guardrail: the *harness* retries a transient tool failure inside the same step, spending no model turn. The `recover=True` arm.
+- **retry-nudge** — a *different* guardrail (S5+): re-prompt the *model* to try again after a failure — which still costs it a turn. Built as a sibling toggle later.
+- **harness-level retry** — a retry done by the surrounding code (the harness), not the model, so it consumes no reasoning turn. The mechanism behind error-recovery.
+- **max_recoveries** — the cap on how many harness-level retries one tool call may use before the loop gives up and feeds the error back to the model.
+- **Wilson interval** — the believable range for *one* proportion (an arm's pass-rate) given only N samples; stays inside [0, 1] and behaves near 0%/100%, where a ±std interval breaks.
+- **Newcombe interval** — the believable range for the *difference* between two proportions (the gap between arms); built by combining the two arms' Wilson intervals ("square-and-add").
+- **point estimate** — the single best-guess number (e.g. the raw gap = mechanism rate − baseline rate) *before* you attach an interval to it.
+- **straddles zero / excludes zero** — a difference interval that includes 0 *straddles* it (can't claim an effect — the honesty gate); one entirely above or below 0 *excludes* it (a real effect).
+- **paired comparison** — running both arms against the *same* per-trial fault pattern (same seed i), so the measured gap isn't contaminated by one arm drawing luckier faults.
 - **completion rate** — the fraction of trials that finish correctly (k/N); the project's headline number.
 - **fault injection** — deliberately, reproducibly making a tool fail sometimes (a seeded 503) so there's a recoverable failure to measure guardrails against.
 - **transient (503) error** — a tool failure that may succeed if you simply retry it.

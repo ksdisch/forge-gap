@@ -10,8 +10,12 @@ forge-gap/
 ├─ agent.py        # the reason→act→observe loop + deterministic grading
 ├─ scenario.py     # the S2 lookup-then-compute task (2 tools + ground truth)
 ├─ oracle.py       # the deterministic grader (never an LLM judge)
+├─ faults.py       # S3 seeded transient-503 fault injector (with_faults)
+├─ runner.py       # S3 N-trial runner (run_arm): raw k/N per arm
+├─ stats.py        # S4 Wilson + Newcombe confidence intervals
+├─ ablation.py     # S4 two-arm ablation: baseline vs +error-recovery, with CIs
 ├─ verify.py       # smoke test: plain chat + one tool-calling round-trip
-├─ test_oracle.py  # offline unit tests (oracle + scenario + dispatch)
+├─ test_*.py       # offline unit tests (oracle, faults, runner, stats, recover, ablation)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv)
@@ -80,6 +84,27 @@ uv run test_oracle.py
 
 One run is a single sample — a PASS/FAIL *rate* over many runs (with confidence intervals) is
 what later sessions measure.
+
+## 6. Measure the gap (S3–S4 — faults, arms, confidence intervals)
+
+GLM-4.6 aces the clean task (S3: 20/20), so there's **no natural gap** to measure. To build and
+measure the recovery guardrails honestly, S3 **injects** a deterministic, seeded transient 503 into
+the lookup tools at a set rate — a *controlled fault-recovery testbed*, gap and rate disclosed, no
+hidden thumb on the scale. S4 then compares two **arms** over the *same* injected faults:
+
+- **baseline** — the bare loop, versus
+- **+error-recovery** — the harness silently retries a transient fault, spending no model turn.
+
+```bash
+# needs your key in .env — this makes real GLM calls (~N×2 trials)
+uv run ablation.py z-ai/glm-4.6 40 0.6     # args: model, N distinct seeds, fault rate
+```
+
+It prints each arm's completion rate with a **Wilson** confidence interval, the **gap closed**
+between them with a **Newcombe** interval, and a one-line verdict — *a real result* only if that
+interval clears 0; if it straddles 0 we report "no clear effect," never a win. The gap is always
+stated as **injected** (see `docs/DECISIONS.md` D12). Offline, the logic is covered without API
+calls by `uv run test_stats.py`, `test_recover.py`, and `test_ablation.py`.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
