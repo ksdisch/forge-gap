@@ -29,6 +29,8 @@ faults rather than found naturally, say so plainly in the README and writeup.
   never an LLM judge. Pure and unit-tested.
 - `verify.py` — smoke test proving chat + tool-calling work.
 - `test_oracle.py` — offline unit tests for the oracle, scenario ground truth, and `dispatch`.
+- `check_docs.py` — freshness check for the learning spine: flags any done stage missing from
+  `docs/LEARNING.md`. Run `uv run check_docs.py`. A smoke alarm, not a commit gate.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
 - `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
   why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
@@ -67,6 +69,10 @@ to *defend every decision*. These rules bind **every session and tab**.
   to `LEARNING.md`, and ask 3 recall questions. The raw blow-by-blow still goes to
   `docs/session-logs/` via `/wrap`; the three curated docs are the distilled version
   (see `docs/README.md`).
+- **Definition of done (keeps the spine fresh).** A stage isn't finished until its spine updates
+  are committed in the **same PR** as the code, and `uv run check_docs.py` passes (it verifies
+  every done stage is written up). If a session ends before that, the next `/begin` catches the
+  spine up first.
 
 ## Working conventions
 - **Teach while building.** After non-trivial code, explain what/why in plain English and define
