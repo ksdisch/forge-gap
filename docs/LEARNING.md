@@ -295,6 +295,74 @@ Pairing means both arms face the *identical* fault pattern on trial i, so the ga
 
 ---
 
+## S5 — The deliverable: drawing the gap-closure chart
+
+**What we built.** S5 turns S4's measured numbers into the project's one headline picture — the
+**gap-closure chart** — and nothing more. No new model runs: `chart.py` reads the *saved* S4 result
+and draws it. Three pieces:
+
+- **The data, vendored.** S4 wrote its result to `runs/ablation-summary.json`, but `runs/` is
+  *git-ignored* (it's scratch output), so it wouldn't survive a fresh clone. We **vendored** it —
+  committed a copy to `docs/figures/gap-closure-data.json` — so the figure regenerates from numbers
+  that live *inside* the repo, with no paid re-run. That file is the chart's single source of truth.
+- **`chart.py` — the renderer.** Two bars, **Baseline (no mechanism)** vs **+ Error-recovery**, on a
+  0–100% axis. Each bar carries its **Wilson 95% CI** as a *whisker* (the small vertical line showing
+  the honest range around the height) and a `k/N` + percent label; a two-headed arrow between the bar
+  tops is annotated with the **+32.5%** gap and its **Newcombe 95% CI [+17.3%, +48.0%]**. The
+  load-bearing bit is the caption printed *on the figure*: `gap is INJECTED (controlled fault-recovery
+  testbed) · 104 transient 503s absorbed`. The chart must never be mistakable for a natural-gap result.
+- **`test_chart.py` — offline guards.** The pure label/format helpers (no matplotlib) are pinned to
+  exact strings, and one test asserts the vendored data still matches the S4 / D17 numbers — so the
+  figure can't silently drift to plotting something we didn't measure. The render itself is
+  smoke-checked by running `chart.py`. All **seven** offline suites stay green.
+
+**The output.** `uv run chart.py` writes the committed `docs/figures/gap-closure.png`, embedded in
+`README.md` §7: baseline **67.5%** → +error-recovery **100%**, gap **+32.5%**, the interval clears 0
+— the same result as D17, now legible at a glance.
+
+**Teaching note.** Two ideas. **(1) A figure is an argument, so it must carry its own caveats.** The
+single most important mark on this chart isn't a bar — it's the word *INJECTED* in the caption. A
+reader who sees "67.5% → 100%" and walks away believing GLM is naturally that unreliable has been
+misled; the honesty rule (say the gap is manufactured) has to travel *with* the picture, not sit in a
+doc they won't open. **(2) Don't let your deliverable depend on scratch.** The real numbers lived in a
+git-ignored `runs/` file; if the chart read straight from there, anyone cloning the repo (or you,
+after a cleanup) couldn't rebuild it. Vendoring a tracked copy makes the artifact *reproducible from
+the repo alone* — and the test pinning that copy to D17 keeps the convenience from becoming a lie.
+
+**New words.** *gap-closure chart*, *deliverable*, *vendoring*, *error bar / whisker*, *annotation*,
+*headless rendering (Agg)*, *DPI*.
+
+**Recall — try before you reveal:**
+
+Q1. The S4 numbers already existed in `runs/ablation-summary.json`. Why copy them into a tracked
+`docs/figures/gap-closure-data.json` instead of just reading the original?
+
+<details><summary>answer</summary>
+
+Because `runs/` is git-ignored — it's scratch output that isn't committed, so it wouldn't exist after a fresh clone (or a cleanup). *Vendoring* a tracked copy makes the figure regenerable from the repo alone, with no paid re-run. And `test_chart.py` pins that copy to the D17 numbers, so the convenience can't quietly drift into plotting the wrong values.
+
+</details>
+
+Q2. The +error-recovery bar sits at 100%, yet the chart still draws a whisker hanging *below* it. Why
+isn't a 100% bar just a clean line at the top?
+
+<details><summary>answer</summary>
+
+Because 100% is 40/40 on only N=40 — the *true* rate could still be a little under 100%; we just didn't see a failure in 40 tries. The Wilson interval reflects that: [91.2%, 100%]. So the honest read of the bar is its floor, 91.2%, which is exactly what the lower whisker shows. The upper whisker is zero-length (you can't exceed 100%), giving the one-sided look. A bar with no whisker would over-claim certainty.
+
+</details>
+
+Q3. What is the single most important thing printed on this figure, and why does it matter more than
+any bar?
+
+<details><summary>answer</summary>
+
+The caption word **INJECTED**. The bars show a big, real gap-closure — but it was measured against faults we *manufactured* (seeded 503s), not failures GLM produces on its own. Per the project's honesty rule, a figure that could be mistaken for a *natural* gap is misleading. The caption makes the manufactured nature travel with the picture, so the result can't be over-read when the chart is lifted out of its doc.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -338,3 +406,10 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **kill-trigger** — a pre-agreed "stop and change course" condition, fixed in advance so a result you don't like can't be rationalised away.
 - **controlled testbed** — measuring guardrails against faults you injected on purpose (and disclose), rather than a naturally-occurring gap.
 - **retry-exhaustion** — failing because retries (each costing a turn) used up the step budget before the task could finish.
+- **gap-closure chart** — the project's headline figure: how far a guardrail lifts completion above the no-mechanism baseline, drawn with confidence intervals. Built in S5 (`chart.py`).
+- **deliverable** — the one concrete artifact a project exists to produce (here, the gap-closure chart).
+- **vendoring** — committing a copy of an otherwise-uncommitted (git-ignored) file into the repo, so a build doesn't depend on something that isn't tracked.
+- **error bar / whisker** — the small vertical line drawn on a bar to show its confidence interval: the honest range around the plotted height.
+- **annotation** — text or an arrow added to a chart to call out a specific value (here, the +32.5% gap and its Newcombe interval).
+- **headless rendering (Agg)** — drawing a figure straight to an image file with no on-screen window (matplotlib's "Agg" backend), so it works in a script or on a server.
+- **DPI (dots per inch)** — the resolution of a saved image; higher DPI means more pixels and a crisper PNG.

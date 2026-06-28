@@ -1,0 +1,44 @@
+{
+  "model": "z-ai/glm-4.6",
+  "n": 40,
+  "fault_rate": 0.6,
+  "temperature": 0.7,
+  "baseline": {
+    "label": "baseline",
+    "correct": 27,
+    "n": 40,
+    "rate": 0.675,
+    "wilson": [
+      0.52017458088898,
+      0.7991568303733828
+    ],
+    "by_stop": {
+      "submitted": 27,
+      "max_steps": 13
+    },
+    "recoveries": 0
+  },
+  "mechanism": {
+    "label": "error_recovery",
+    "correct": 40,
+    "n": 40,
+    "rate": 1.0,
+    "wilson": [
+      0.9123754607496077,
+      1.0
+    ],
+    "by_stop": {
+      "submitted": 40
+    },
+    "recoveries": 104
+  },
+  "gap_closure": {
+    "delta": 0.32499999999999996,
+    "newcombe": [
+      0.17303625956430102,
+      0.47982541911101995
+    ],
+    "excludes_zero": true
+  },
+  "summary_path": "runs/ablation-summary.json"
+}

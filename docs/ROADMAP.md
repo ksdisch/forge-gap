@@ -13,9 +13,10 @@ Stages are labelled **S0, S1, S2, …** — each is roughly one build session.
 | **S2** | Swaps the placeholder task for the **real** one: look up an order, look up its zone's shipping rate (a *chained* lookup), add them, submit the total — graded against the known answer (158) by a deterministic **oracle**, never another AI. | Gives the project a real task whose failures are *mechanical* ("called the wrong tool"), not *cognitive* ("bad at math") — the distinction the whole thesis rests on. | ✅ done |
 | **S3** | Run that task **many times** on GLM-4.6 and hand-read the trajectories. **Result:** 20/20 — no *natural* gap (kill-trigger 1). Pivot (a *sequence*, not a fork): inject deterministic mechanical faults as the **foundation/floor** (a *controlled fault-recovery testbed*), then later tune harder for a **natural-gap stretch** that reuses the same harness + guardrails (DECISIONS D12). | Proves whether a gap exists and is the *fixable* kind — here the floor is manufactured honestly, with a natural gap as the stretch. Confirmed: rate-0.5 injection → 80% baseline, all-mechanical. | ✅ done |
 | **S4** | The **first mechanism arm + the ablation runner**: add a toggleable **error-recovery** guardrail (the harness silently retries a transient tool fault, spending *no* model turn), then run **two arms** — baseline vs +error-recovery — over the *same* injected faults and compute proper confidence intervals (Wilson per arm + Newcombe on the gap between them). | Turns one-off runs into a *measurement of a difference*: the gap-closure number, with honest error bars instead of a bare k/N. | ✅ done — **measured**: 67.5% → 100%, **+32.5%** (Newcombe 95% CI [+17.3%, +48.0%]) at rate 0.6, N=40 |
-| **S5–S12** | Layer the **remaining guardrails** (e.g. retry-nudge) one at a time, optionally inject faults, and draw the **gap-closure chart** across arms. | The actual deliverable: how much each guardrail closes the gap. | ⬜ planned |
+| **S5** | Draw the **gap-closure chart** — turn S4's two measured arms into the project's headline figure (`chart.py` → `docs/figures/gap-closure.png`): two bars with **Wilson** whiskers, the **Newcombe** gap annotation, and an honesty caption. Reads the *saved* S4 numbers — no re-run. | The actual deliverable, made legible: one honest figure of how much error-recovery closes the injected gap. | ✅ done |
+| **S6–S12** | Layer the **remaining guardrails** (e.g. retry-nudge) one at a time, optionally add a new fault type, and extend the chart across more arms. | How much *each* guardrail closes the gap. | ⬜ planned |
 
-*(forge-gap runs **S0 → ~S12**; S5–S12 layer one mechanism at a time and then build the chart — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
+*(forge-gap runs **S0 → ~S12**; the gap-closure chart now exists at **S5**, and **S6–S12** layer the remaining mechanisms one at a time and extend it — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
 
 > **Honesty rule (load-bearing):** the framing is always *"reproduced and measured a known
 > primitive — here's the narrow, measured delta,"* never *"I invented this."* If a gap is
@@ -49,6 +50,19 @@ the harness absorbed **104** transient 503s, spending no model turns). **Gap clo
 real result by our honesty rule. All six offline suites stay green. The choices + measured result are
 DECISIONS D14–D17. **Next (S5+):** add retry-nudge as a second arm and draw the gap-closure chart;
 the **natural-gap stretch** (D12) remains the bigger prize.
+
+**S5 done — the deliverable figure exists.** The two S4 arms are now drawn as the project's
+headline **gap-closure chart** (`chart.py` → `docs/figures/gap-closure.png`): two bars — baseline
+**67.5%** vs +error-recovery **100%** — each with its **Wilson 95% CI** as a whisker, the **+32.5%**
+gap annotated with its **Newcombe 95% CI [+17.3%, +48.0%]**, and an honesty caption stating the gap
+is *injected* (104 transient 503s absorbed). It reads straight from the *saved* S4 numbers (vendored
+at `docs/figures/gap-closure-data.json`) — **no re-run, no API** — and regenerates with
+`uv run chart.py`. Pure label/format helpers are covered offline by `test_chart.py`; all **seven**
+offline suites stay green. The choice + design are DECISIONS **D18**. **Next (S6+):** add
+**retry-nudge** as a second mechanism arm — heads-up, against the current 503 faults it will likely
+measure **~null** (the bare loop already self-retries), so it only earns a real bar paired with a
+failure it actually fixes (e.g. a malformed-call fault — a new `faults.py` type). The
+**natural-gap stretch** (D12) is still the headline goal.
 
 > **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
 > natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say

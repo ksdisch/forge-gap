@@ -1,0 +1,163 @@
+"""chart.py — render the forge-gap gap-closure figure (S5, the deliverable).
+
+Reads the *saved* S4 ablation result (vendored at `docs/figures/gap-closure-data.json`,
+a tracked copy of the git-ignored `runs/ablation-summary.json` — see DECISIONS D18) and
+draws the project's headline figure: a two-bar task-completion chart, baseline vs
++error-recovery, each bar carrying its **Wilson 95% CI** as a whisker, annotated with the
+**Newcombe 95% CI** on the gap between them, plus an honesty caption stating the gap is
+*injected*, not natural (the ROADMAP honesty rule).
+
+No model calls, no network — it only plots numbers already measured in S4. Run:
+
+    uv run chart.py            # writes docs/figures/gap-closure.png
+
+The pure label/format helpers (`pct`, `signed_pp`, `fmt_pp_ci`, `bar_label`, `gap_label`,
+`caption`, `wilson_yerr`) are matplotlib- and network-free so `test_chart.py` can check
+them offline; the actual render lives in `build_figure` and is smoke-verified by running.
+"""
+from __future__ import annotations
+
+import json
+import os
+
+DATA_PATH = os.path.join("docs", "figures", "gap-closure-data.json")
+OUT_PATH = os.path.join("docs", "figures", "gap-closure.png")
+
+# Palette: muted gray for the no-help baseline, positive teal for the mechanism arm.
+BASELINE_COLOR = "#9e9e9e"
+MECHANISM_COLOR = "#2a9d8f"
+
+
+# --- pure helpers (no matplotlib; unit-tested offline in test_chart.py) -------
+
+def load_summary(path: str = DATA_PATH) -> dict:
+    """Load the vendored S4 ablation summary — the figure's single source of truth."""
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def pct(rate: float, places: int = 1) -> str:
+    """A rate in [0, 1] as a percentage string: 0.675 -> '67.5%'."""
+    return f"{rate * 100:.{places}f}%"
+
+
+def signed_pp(value: float, places: int = 1) -> str:
+    """A difference in *percentage points*, with an explicit sign: 0.325 -> '+32.5'."""
+    return f"{value * 100:+.{places}f}"
+
+
+def fmt_pp_ci(lo: float, hi: float) -> str:
+    """A difference interval in signed percentage points: (0.173, 0.480) -> '[+17.3, +48.0]'."""
+    return f"[{signed_pp(lo)}, {signed_pp(hi)}]"
+
+
+def bar_label(arm: dict) -> str:
+    """Two-line data label for a bar: '67.5%\\n(27/40)'."""
+    return f"{pct(arm['rate'])}\n({arm['correct']}/{arm['n']})"
+
+
+def gap_label(gap: dict) -> str:
+    """The gap annotation: the closed delta + its Newcombe confidence interval."""
+    lo, hi = gap["newcombe"]
+    return f"gap {signed_pp(gap['delta'])}%\nNewcombe 95% CI\n{fmt_pp_ci(lo, hi)}"
+
+
+def caption(s: dict) -> str:
+    """The load-bearing honesty caption printed on the figure (the gap is INJECTED)."""
+    mech = s["mechanism"]
+    return (
+        f"N={s['n']} paired seeds  ·  fault-rate {s['fault_rate']}  ·  "
+        f"temp {s['temperature']}  ·  {s['model']}\n"
+        f"gap is INJECTED (controlled fault-recovery testbed)  ·  "
+        f"{mech['recoveries']} transient 503s absorbed at the harness"
+    )
+
+
+def wilson_yerr(arm: dict) -> tuple[float, float]:
+    """Asymmetric whisker offsets (lower, upper), in *rate* units, from the bar top
+    out to that arm's Wilson bounds. A 100% bar has a one-sided whisker (upper = 0)."""
+    lo, hi = arm["wilson"]
+    return arm["rate"] - lo, hi - arm["rate"]
+
+
+# --- the figure (matplotlib; smoke-verified by running chart.py) --------------
+
+def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
+    """Draw the two-bar gap-closure chart from the summary `s`; write `out_path`."""
+    import matplotlib
+    matplotlib.use("Agg")  # headless backend: render straight to a file, no display
+    import matplotlib.pyplot as plt
+
+    base, mech, gap = s["baseline"], s["mechanism"], s["gap_closure"]
+    arms = [base, mech]
+    xs = [0, 1]
+    heights = [a["rate"] * 100 for a in arms]
+    lo_err = [wilson_yerr(a)[0] * 100 for a in arms]
+    up_err = [wilson_yerr(a)[1] * 100 for a in arms]
+
+    fig, ax = plt.subplots(figsize=(8.0, 5.5), dpi=150)
+
+    ax.bar(
+        xs, heights, width=0.5, color=[BASELINE_COLOR, MECHANISM_COLOR],
+        edgecolor="#333333", linewidth=1.0,
+        yerr=[lo_err, up_err], capsize=7,
+        error_kw=dict(ecolor="#222222", elinewidth=1.6, capthick=1.6),
+        zorder=3,
+    )
+
+    # Data label above each arm's upper whisker cap (k/N + %).
+    for xi, a in zip(xs, arms):
+        ax.text(xi, a["wilson"][1] * 100 + 2.5, bar_label(a),
+                ha="center", va="bottom", fontsize=11, fontweight="bold", color="#222222")
+
+    # Gap annotation: dashed baseline reference line + a two-headed arrow showing the
+    # climb from the baseline rate up to the mechanism rate, labelled with the Newcombe CI.
+    base_top, mech_top = base["rate"] * 100, mech["rate"] * 100
+    gx = 1.58
+    ax.hlines(base_top, -0.25, gx, linestyles="dashed", color="#9e9e9e", lw=1.2, zorder=2)
+    ax.annotate("", xy=(gx, mech_top), xytext=(gx, base_top),
+                arrowprops=dict(arrowstyle="<->", color=MECHANISM_COLOR, lw=2.0), zorder=4)
+    ax.text(gx + 0.10, (base_top + mech_top) / 2, gap_label(gap),
+            ha="left", va="center", fontsize=10.5, color="#1d6f66",
+            bbox=dict(boxstyle="round,pad=0.4", fc="#e8f5f3", ec=MECHANISM_COLOR, lw=1.0))
+
+    # Axes cosmetics.
+    ax.set_xticks(xs)
+    ax.set_xticklabels(["Baseline\n(no mechanism)", "+ Error-recovery\n(harness retry)"], fontsize=11)
+    ax.set_ylabel("Task completion rate", fontsize=12)
+    ax.set_ylim(0, 118)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_yticklabels([f"{t}%" for t in (0, 20, 40, 60, 80, 100)])
+    ax.set_xlim(-0.6, 2.7)
+    ax.yaxis.grid(True, color="#e9e9e9", lw=1.0)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+
+    fig.suptitle("Closing the reliability gap with error-recovery",
+                 fontsize=14, fontweight="bold", y=0.98)
+    ax.set_title("GLM-4.6 · multi-step tool task · injected transient-fault testbed",
+                 fontsize=10, color="#666666", pad=10)
+    fig.text(0.5, 0.015, caption(s), ha="center", va="bottom",
+             fontsize=8.5, color="#777777", style="italic")
+
+    fig.tight_layout(rect=(0, 0.07, 1, 0.95))
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def main() -> int:
+    s = load_summary()
+    out = build_figure(s)
+    g = s["gap_closure"]
+    verdict = "REAL (clears 0)" if g["excludes_zero"] else "null (straddles 0)"
+    print(f"wrote {out}")
+    print(f"  baseline        {pct(s['baseline']['rate'])} ({s['baseline']['correct']}/{s['baseline']['n']})")
+    print(f"  +error-recovery {pct(s['mechanism']['rate'])} ({s['mechanism']['correct']}/{s['mechanism']['n']})")
+    print(f"  gap {signed_pp(g['delta'])}%  Newcombe {fmt_pp_ci(g['newcombe'][0], g['newcombe'][1])}  -> {verdict}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

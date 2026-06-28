@@ -14,11 +14,13 @@ forge-gap/
 ├─ runner.py       # S3 N-trial runner (run_arm): raw k/N per arm
 ├─ stats.py        # S4 Wilson + Newcombe confidence intervals
 ├─ ablation.py     # S4 two-arm ablation: baseline vs +error-recovery, with CIs
+├─ chart.py        # S5 the deliverable: renders the gap-closure figure from saved numbers
 ├─ verify.py       # smoke test: plain chat + one tool-calling round-trip
-├─ test_*.py       # offline unit tests (oracle, faults, runner, stats, recover, ablation)
+├─ test_*.py       # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart)
+├─ docs/figures/   # the committed gap-closure chart (PNG) + its vendored data (JSON)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
-└─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv)
+└─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv + matplotlib)
 ```
 
 ## 1. Get your key
@@ -105,6 +107,27 @@ between them with a **Newcombe** interval, and a one-line verdict — *a real re
 interval clears 0; if it straddles 0 we report "no clear effect," never a win. The gap is always
 stated as **injected** (see `docs/DECISIONS.md` D12). Offline, the logic is covered without API
 calls by `uv run test_stats.py`, `test_recover.py`, and `test_ablation.py`.
+
+## 7. The result (S5 — the gap-closure chart)
+
+The deliverable: how much the **error-recovery** guardrail closes the injected gap — drawn
+straight from the saved S4 numbers, no re-run.
+
+![Gap-closure chart — baseline 67.5% vs +error-recovery 100% on GLM-4.6](docs/figures/gap-closure.png)
+
+On the injected transient-fault testbed (N=40 paired seeds, fault-rate 0.6, temp 0.7), GLM-4.6
+completes the task **67.5%** of the time with no help (Wilson 95% CI [52.0%, 79.9%]) and **100%**
+with harness-level error-recovery (Wilson 95% CI [91.2%, 100%]) — a **+32.5%** gap closed,
+Newcombe 95% CI **[+17.3%, +48.0%]**. The interval clears 0 *and* the two Wilson bars don't
+overlap, so it's a real result by the project's honesty rule — and *not* a natural gap: the
+failures are injected 503s the harness absorbs (104 of them), a controlled fault-recovery testbed,
+stated plainly on the figure itself.
+
+Regenerate it from the vendored numbers — no API, no model call:
+
+```bash
+uv run chart.py     # reads docs/figures/gap-closure-data.json -> docs/figures/gap-closure.png
+```
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
