@@ -326,3 +326,100 @@ it just means "what we decided and why, written down so future-you isn't confuse
   confidence interval (the honest range around the height). *vendoring* = committing a copy of an
   otherwise-uncommitted file into the repo so the build doesn't depend on something git-ignored.
   *DPI* = dots per inch, the resolution of a saved image.
+
+---
+
+## D19 — S6 scope = the retry-nudge arm on a NEW malformed-call fault ⭐ *(start-of-stage brief; scope + fault design signed off 2026-06-29 — build in progress)*
+
+This is a **start-of-stage brief** (written before the code, per the per-stage rhythm). It records
+the scope we locked, the design fork inside it, and one load-bearing honesty risk to weigh before
+spending on the live run.
+
+- **The choice (signed off):** make S6 the project's **second guardrail arm — retry-nudge** —
+  measured on a **new fault type it can actually fix**. Error-recovery (S4) was the guardrail for
+  *transient* faults; retry-nudge is the guardrail for *malformed* ones.
+- **Scope options weighed:** (a) build the retry-nudge arm (needs a new malformed-call fault) ✅ ·
+  (b) chase the **natural gap** (drop injected faults, harden the task until GLM fails on its own —
+  D12's headline prize, but open-ended/high-variance) · (c) freeze scope and write up (the S5 chart
+  is already the deliverable — lowest effort, thinnest learning).
+- **Why (a):** it's the methodology's own rule — *layer one mechanism at a time* (D6) — it's bounded
+  and reuses every seam, and it gives the project a **second measured bar** (the whole point is
+  measuring how much *each* guardrail closes the gap). It also upgrades the testbed so the
+  natural-gap stretch (b) later stands on richer ground. Chosen over (b) because (b) is higher-variance
+  and better attempted once two clean injected-gap measurements exist; over (c) because the deliverable
+  is a *measurement project*, and one bar is a thin story.
+
+### Why retry-nudge needs a NEW fault (the load-bearing reason it wasn't trivially next)
+Against our existing **transient 503** fault, retry-nudge measures **~null**: the bare loop already
+re-calls a 503'd tool on its own, and a transient fault clears on *any* fresh re-call (D14/D18). A
+guardrail only earns a real bar against a failure it *actually* fixes. Retry-nudge's matched failure
+is a **malformed call** — the model's *own* call is wrong, so a blind harness re-call can't fix it,
+but re-prompting the *model* to correct it can. So "build retry-nudge" necessarily means "build a
+malformed-call fault first."
+
+### The fault design (signed off): reject-and-hint
+- **Options weighed:** (1) **reject-and-hint** ✅ · (2) route-around a hard-down tool (broader
+  "adapt your plan" recovery, but adds a fallback tool + a looser story) · (3) use GLM's *own*
+  malformed calls, no injection (most honest but unreliable to trigger — effectively the natural-gap
+  path for this fault class).
+- **The mechanism:** at a seeded rate an "armed" lookup tool **rejects the documented parameter**
+  (`order_id` / `zone`) with an informative `400 invalid_argument: … use 'id' / 'region' instead`
+  error; a **corrected** call (`id=` / `region=`) bypasses the fault and returns the real record.
+  Disclosed as injected, exactly like the 503.
+- **Two load-bearing properties the design must have:**
+  1. **Classified *permanent*, not transient.** The `400 invalid_argument` string matches none of
+     `agent._is_retryable`'s hints, so **error-recovery leaves it alone** — its harness-retry only
+     fires on *transient* errors (D17). That separation is exactly what we want, and it's *free*
+     (already built).
+  2. **Sticky to an identical re-call.** The 503 is a fresh coin-flip *per call*, so any re-call
+     clears it. A malformed fault must instead be deterministic on the call itself (armed per
+     `seed`+tool, not re-drawn), so a **blind resend keeps failing and only a *corrected* call
+     succeeds.** Without stickiness a lucky resend would pass and we'd be measuring luck, not
+     correction.
+
+### The experiment (proposed): 3 arms on ONE testbed
+Run **baseline / +error-recovery / +retry-nudge** all on the **malformed-fault** testbed — same
+faults, one completion-rate axis, three bars:
+- **baseline** — no mechanism (the control).
+- **+error-recovery** — expected **≈ baseline** (a permanent fault isn't retried). This arm is the
+  *in-experiment control* that *shows* the wrong guardrail doesn't help — guardrail **specificity**.
+- **+retry-nudge** — expected to **lift** (the model corrects its call when re-prompted).
+
+This is a cleaner design than a 2×2 (transient×malformed): holding the fault fixed and varying only
+the guardrail makes the contrast a single, legible ablation. Measured with the **same** Wilson +
+Newcombe CIs and the straddles-zero honesty gate (D16). Each non-baseline arm gets a Newcombe
+interval **vs the shared baseline**.
+
+### The retry-nudge mechanism
+A new `nudge` toggle on `agent.run` (sibling to S4's `recover`). When a non-terminal tool call fails
+(after any recovery), the harness appends **one explicit corrective re-prompt** that turn —
+"that call failed: …; don't repeat it, fix the arguments per the error, and call again" — and counts
+a `nudge`. Unlike error-recovery (retries at the *harness*, **no** model turn), retry-nudge spends a
+**model turn** (the re-prompt), which is the defining cost contrast (D14). The bare baseline appends
+nothing (it just feeds the raw error back as the tool result and loops).
+
+### The honesty risk to weigh BEFORE the paid run (load-bearing)
+GLM-4.6 may **self-correct from the hint in the baseline already** (it sees the `use 'id'` error as a
+tool result and fixes its next call without any nudge). If so, retry-nudge measures **null** and the
+chart is flat. We handle this honestly, not by tuning for a win:
+- A cheap **live pilot** (~N=6, all 3 arms) runs *first*, to confirm the wiring and check the baseline
+  isn't already at ceiling. If it is, we retune the *difficulty* honestly (raise the rate, arm both
+  tools, trim the step budget) and **say so** — never weaken the baseline's information to manufacture
+  a gap.
+- Either outcome is a real finding under the CI gate: a lift ("retry-nudge recovers malformed calls")
+  or a null ("GLM self-corrects malformed calls unaided; the explicit nudge adds nothing at this N").
+- The **robust** part of the result holds regardless: **error-recovery ≈ baseline** on malformed calls
+  is structural (a permanent error isn't retried), so S6 demonstrates **guardrail specificity** even in
+  the worst case.
+
+### Plain-English terms
+- *malformed call* = the model's tool call is itself wrong (wrong parameter name/type, bad JSON), so
+  the tool rejects it — as opposed to a *transient* fault where the call is fine but the service
+  hiccups.
+- *retry-nudge* = a guardrail that **re-prompts the model** to fix and retry a failed call; costs a
+  model turn. Contrast *error-recovery*, which retries at the **harness** and costs **no** turn.
+- *sticky fault* = a fault that recurs on an *identical* re-call (so only a genuinely *changed* call
+  clears it), as opposed to a fresh per-call coin-flip.
+- *guardrail specificity* = each guardrail fixes its own failure type and not others (error-recovery↔
+  transient, retry-nudge↔malformed) — the thing the 3-bar chart is built to show.
+- *pilot* = a tiny, cheap trial run done first to de-risk a bigger, costlier one.

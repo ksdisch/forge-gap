@@ -120,6 +120,19 @@ def dispatch_with_recovery(
     return ok, result, recoveries
 
 
+# --- retry-nudge: the S6 mechanism (an explicit corrective re-prompt) ------
+def _nudge_message(failures: list[tuple[str, str]]) -> str:
+    """Build retry-nudge's re-prompt: name each failed tool + its error and tell the model to
+    fix-and-retry (not blindly repeat). The load-bearing contrast with error-recovery: this is a
+    *model* turn — the model re-reasons and re-calls — so it can correct a MALFORMED call a blind
+    harness retry never could, at the cost of one turn (DECISIONS D19)."""
+    detail = "; ".join(f"{name}: {err}" for name, err in failures)
+    return (
+        f"Your last tool call failed — {detail}. "
+        "Do not repeat the same call. Read the error, correct the arguments, and call the tool again."
+    )
+
+
 # --- the loop -------------------------------------------------------------
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -133,6 +146,7 @@ def run(
     temperature: float = TEMPERATURE,
     recover: bool = False,
     max_recoveries: int = MAX_RECOVERIES,
+    nudge: bool = False,
     out_path: str = TRAJECTORY_PATH,
 ) -> dict:
     """Run one reason->act->observe loop to completion, then grade it.
@@ -148,8 +162,15 @@ def run(
     +error-recovery, the two configurations the S4 ablation compares (DECISIONS D8/D11 — the
     mechanism wraps the LOOP, never the task; the `Scenario` stays fixed).
 
-    Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and
-    how many harness-level recoveries fired); writes the full trajectory to `out_path`.
+    `nudge` toggles the S6 **retry-nudge** mechanism: when True, a non-terminal tool call that fails
+    triggers an explicit corrective re-prompt — the harness appends one `user` message that turn
+    ("that call failed: …; correct the arguments and call again"). Unlike error-recovery (a harness
+    retry, NO model turn), retry-nudge spends a model turn, so it can fix a MALFORMED call a blind
+    retry cannot (DECISIONS D19). `nudge=False` is the bare baseline (the raw error is fed back as the
+    tool result and the loop moves on). The two toggles are independent arms; either, both, or neither.
+
+    Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and how
+    many harness-level recoveries and corrective nudges fired); writes the full trajectory to `out_path`.
     """
     resolved_model = model or MODEL
     messages = [
@@ -164,7 +185,7 @@ def run(
     log({
         "event": "run", "ts": _now(), "model": resolved_model, "scenario": scenario.name,
         "temperature": temperature, "max_steps": max_steps, "max_tokens": MAX_TOKENS,
-        "recover": recover, "max_recoveries": max_recoveries,
+        "recover": recover, "max_recoveries": max_recoveries, "nudge": nudge,
         "task": scenario.task,
         "ground_truth": scenario.ground_truth,
     })
@@ -174,6 +195,7 @@ def run(
     submitted = None          # the value GLM passed to submit_answer (None if it never did)
     prompt_tokens = completion_tokens = 0
     total_recoveries = 0      # harness-level retries the error-recovery arm absorbed this run
+    total_nudges = 0          # corrective re-prompts the retry-nudge arm issued this run
 
     for step in range(max_steps):
         resp = chat(messages, model=resolved_model, tools=scenario.tools,
@@ -219,6 +241,7 @@ def run(
         })
 
         terminated = False
+        turn_failures: list[tuple[str, str]] = []  # non-terminal calls that failed this turn
         for c in calls:
             # Parse the args. Malformed JSON is a REASON-phase mechanical failure.
             try:
@@ -260,6 +283,17 @@ def run(
             log({"event": "observe", "step": step, "tool_call_id": c.id,
                  "ok": ok, "result": result})
             messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
+            if not ok:
+                turn_failures.append((c.function.name, result))
+
+        # retry-nudge (S6) — after all tool results are threaded back (so the API's tool-call
+        # ordering stays valid), append ONE explicit corrective re-prompt this turn if anything
+        # failed. It costs the model a turn; the bare baseline (nudge=False) appends nothing.
+        if nudge and turn_failures and not terminated:
+            messages.append({"role": "user", "content": _nudge_message(turn_failures)})
+            total_nudges += 1
+            log({"event": "nudge", "step": step, "count": total_nudges,
+                 "failures": [{"tool": n, "error": e} for n, e in turn_failures]})
 
         if terminated:
             break
@@ -267,7 +301,7 @@ def run(
     # GRADE — the deterministic oracle has the final word (never an LLM).
     correct, detail = grade(submitted, scenario.ground_truth)
     log({"event": "final", "step": step, "stop": stop, "answer": final_answer,
-         "recoveries": total_recoveries})
+         "recoveries": total_recoveries, "nudges": total_nudges})
     log({
         "event": "grade", "submitted": submitted, "expected": scenario.ground_truth,
         "correct": correct, "reason": detail["reason"], "stop": stop,
@@ -288,6 +322,8 @@ def run(
         "reasoning_turns": sum(1 for r in records if r["event"] == "reason"),
         "recover": recover,
         "recoveries": total_recoveries,
+        "nudge": nudge,
+        "nudges": total_nudges,
         "tokens": {"prompt": prompt_tokens, "completion": completion_tokens},
         "trajectory": out_path,
         "records": len(records),
@@ -304,6 +340,7 @@ def main() -> int:
     print(f"stop           : {s['stop']}")
     print(f"reasoning turns: {s['reasoning_turns']}")
     print(f"recoveries     : {s['recoveries']}  (recover={s['recover']})")
+    print(f"nudges         : {s['nudges']}  (nudge={s['nudge']})")
     print(f"submitted      : {s['submitted']!r}   expected: {s['expected']!r}")
     print(f"oracle         : {verdict}")
     print(f"tokens         : prompt={s['tokens']['prompt']} "

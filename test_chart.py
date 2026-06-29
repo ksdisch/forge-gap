@@ -22,7 +22,11 @@ from chart import (
     caption,
     fmt_pp_ci,
     gap_label,
+    gap_tag,
+    is_win,
     load_summary,
+    multi_caption,
+    nudges_spent,
     pct,
     signed_pp,
     wilson_yerr,
@@ -105,6 +109,55 @@ def test_vendored_data_matches_d17() -> None:
     check("gap excludes zero -> a real result", s["gap_closure"]["excludes_zero"] is True)
 
 
+# --- S6: the N-bar malformed figure's pure helpers ------------------------
+def _multi() -> dict:
+    """A synthetic `arms`-shaped summary: baseline, a NULL error-recovery arm, a REAL nudge arm."""
+    return {
+        "model": "z-ai/glm-4.6", "n": 40, "fault_rate": 0.6, "temperature": 0.7,
+        "fault_kind": "malformed", "baseline_label": "baseline",
+        "arms": [
+            {"label": "baseline", "correct": 24, "n": 40, "rate": 0.6,
+             "wilson": [0.44, 0.74], "by_stop": {}, "recoveries": 0, "nudges": 0},
+            {"label": "error_recovery", "correct": 25, "n": 40, "rate": 0.625,
+             "wilson": [0.46, 0.76], "by_stop": {}, "recoveries": 0, "nudges": 0,
+             "gap_vs_baseline": {"delta": 0.025, "newcombe": [-0.18, 0.22], "excludes_zero": False}},
+            {"label": "retry_nudge", "correct": 38, "n": 40, "rate": 0.95,
+             "wilson": [0.83, 0.99], "by_stop": {}, "recoveries": 0, "nudges": 57,
+             "gap_vs_baseline": {"delta": 0.35, "newcombe": [0.18, 0.50], "excludes_zero": True}},
+        ],
+    }
+
+
+def test_is_win() -> None:
+    print("is_win — bar colour follows the measured verdict, never the hoped-for one")
+    arms = _multi()["arms"]
+    check("baseline (no gap) is not a win", is_win(arms[0]) is False)
+    check("a straddles-0 mechanism is not a win", is_win(arms[1]) is False)
+    check("a clears-0 mechanism is a win", is_win(arms[2]) is True)
+
+
+def test_gap_tag() -> None:
+    print("gap_tag — per-mechanism delta + Newcombe CI + real/null verdict")
+    arms = _multi()["arms"]
+    check("real arm -> 'Δ +35.0 pp\\n[+18.0, +50.0]\\n→ real'",
+          gap_tag(arms[2]) == "Δ +35.0 pp\n[+18.0, +50.0]\n→ real")
+    check("null arm -> 'Δ +2.5 pp\\n[-18.0, +22.0]\\n→ null'",
+          gap_tag(arms[1]) == "Δ +2.5 pp\n[-18.0, +22.0]\n→ null")
+
+
+def test_nudges_and_multi_caption() -> None:
+    print("nudges_spent / multi_caption — honesty disclosure for the malformed figure")
+    s = _multi()
+    check("nudges_spent reads the retry-nudge arm (57)", nudges_spent(s) == 57)
+    cap = multi_caption(s)
+    for piece in ("N=40", "malformed-call fault-rate 0.6", "temp 0.7", "z-ai/glm-4.6",
+                  "57 corrective re-prompts"):
+        check(f"caption mentions '{piece}'", piece in cap)
+    check("caption says the gap is INJECTED", "INJECTED" in cap)
+    check("caption states error-recovery can't fix a malformed call",
+          "error-recovery can't fix a malformed call" in cap)
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -114,6 +167,9 @@ def main() -> int:
         test_caption_states_injected,
         test_wilson_yerr,
         test_vendored_data_matches_d17,
+        test_is_win,
+        test_gap_tag,
+        test_nudges_and_multi_caption,
     ):
         t()
         print()

@@ -88,6 +88,7 @@ def run_arm(
     tok_prompt = sum((t.get("tokens") or {}).get("prompt", 0) for t in trials)
     tok_completion = sum((t.get("tokens") or {}).get("completion", 0) for t in trials)
     recoveries = sum(t.get("recoveries", 0) for t in trials)  # harness retries this arm absorbed
+    nudges = sum(t.get("nudges", 0) for t in trials)          # corrective re-prompts this arm issued
 
     results_path = os.path.join(arm_dir, "results.jsonl")
     with open(results_path, "w", encoding="utf-8") as f:
@@ -107,6 +108,7 @@ def run_arm(
         "rate": rate,
         "by_stop": by_stop,
         "recoveries": recoveries,
+        "nudges": nudges,
         "tokens": {"prompt": tok_prompt, "completion": tok_completion},
         "results_path": results_path,
         "trials": trials,
