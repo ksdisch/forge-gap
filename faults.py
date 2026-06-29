@@ -12,6 +12,15 @@ planned guardrails: the recovery is "the call failed — try again." A malformed
 parsing-recovery (fuzzier), and a wrong record tests *validation* (a different guardrail entirely,
 since no error fires). We can add those later; the 503 is the clean match for retry/recovery.
 
+S6 adds a *second* fault — `with_malformed_faults` — the failure that **retry-nudge** fixes but
+**error-recovery** cannot (DECISIONS D19). Where the 503 is a flaky *service* (the call is fine, the
+tool hiccups), a malformed-call fault is a bad *call*: an "armed" tool rejects the documented
+parameter (`order_id`/`zone`) with an informative `400 invalid_argument` hint, and only a *corrected*
+call (`id`/`region`) clears it. Two deliberate properties make it the right test: it is classified
+**permanent** by `agent._is_retryable` (so a blind harness-retry won't touch it — that's what
+separates the two guardrails), and it is **sticky** (armed per seed+tool, never re-drawn per call),
+so a blind identical resend keeps failing and only a genuinely corrected call succeeds.
+
 Design notes:
   - **Non-mutating:** `with_faults` returns a NEW Scenario (via `dataclasses.replace`); the
     original ORDER_SCENARIO is never touched, so the clean baseline stays clean.
@@ -25,6 +34,7 @@ Design notes:
 from __future__ import annotations
 
 import functools
+import inspect
 import random
 from dataclasses import replace
 
@@ -57,3 +67,68 @@ def with_faults(scenario: Scenario = ORDER_SCENARIO, *, rate: float, seed: int) 
 
     faulty_registry = {name: wrap(name, fn) for name, fn in scenario.registry.items()}
     return replace(scenario, name=f"{scenario.name}__faults{rate}", registry=faulty_registry)
+
+
+# --- S6: the malformed-call fault (reject-and-hint) -----------------------
+class MalformedCall(Exception):
+    """A permanent, model-fixable tool rejection (a 400-style invalid-argument) — the injected
+    malformed-call fault. Unlike `ToolUnavailable` (transient/retryable), a blind retry can't clear
+    this; only re-calling with corrected arguments can. See DECISIONS D19."""
+
+
+# Each lookup tool's *documented* parameter (the one the model naturally sends, from the schema)
+# maps to the *corrected* parameter name the malformed-fault hint demands. Arming a tool rejects the
+# documented name and accepts the corrected one — a clean "wrong parameter -> read the error -> fix
+# it" loop. A tool whose documented param has no alias here is simply never faulted (graceful).
+_PARAM_ALIAS = {
+    "order_id": "id",
+    "zone": "region",
+}
+
+
+def _documented_param(fn) -> str | None:
+    """The single parameter name a lookup tool documents (what the model naturally sends)."""
+    params = list(inspect.signature(fn).parameters)
+    return params[0] if params else None
+
+
+def with_malformed_faults(scenario: Scenario = ORDER_SCENARIO, *, rate: float, seed: int) -> Scenario:
+    """Return a copy of `scenario` whose lookup tools may reject the *documented* parameter.
+
+    For each tool, a seeded draw keyed on (seed, tool-name) decides whether that tool is **armed**
+    for this scenario, with probability `rate`. An armed tool:
+      - rejects a call using the documented parameter (`order_id`/`zone`) with an informative
+        `MalformedCall("400 invalid_argument: … use 'id'/'region' instead")`, and
+      - accepts a *corrected* call (using the aliased parameter) — returning the real record.
+    An unarmed tool behaves exactly like the clean tool.
+
+    Two load-bearing properties (DECISIONS D19): the rejection is **permanent** (classified
+    non-retryable by `agent._is_retryable`, so error-recovery won't touch it) and **sticky** (armed
+    per seed+tool, not re-drawn per call — a blind identical resend keeps failing; only a corrected
+    call clears it). `rate=0.0` reproduces the original behavior exactly.
+    """
+    if not 0.0 <= rate <= 1.0:
+        raise ValueError(f"rate must be in [0.0, 1.0], got {rate!r}")
+
+    def wrap(tool_name, fn):
+        documented = _documented_param(fn)
+        corrected = _PARAM_ALIAS.get(documented)
+        # Armed once per (seed, tool) -> sticky across every call to this tool in this scenario.
+        armed = corrected is not None and random.Random(f"{seed}:{tool_name}").random() < rate
+
+        @functools.wraps(fn)
+        def faulty(**kwargs):
+            if corrected is not None and corrected in kwargs:
+                # The model corrected its call — accept it, mapping back to the real parameter.
+                return fn(**{documented: kwargs[corrected]})
+            if armed:
+                raise MalformedCall(
+                    f"400 invalid_argument: {tool_name} received unrecognized parameter "
+                    f"{documented!r}; call {tool_name} with {corrected!r} instead "
+                    f"(e.g. {tool_name}({corrected}=...))."
+                )
+            return fn(**kwargs)
+        return faulty
+
+    faulty_registry = {name: wrap(name, fn) for name, fn in scenario.registry.items()}
+    return replace(scenario, name=f"{scenario.name}__malformed{rate}", registry=faulty_registry)

@@ -23,9 +23,23 @@ import os
 DATA_PATH = os.path.join("docs", "figures", "gap-closure-data.json")
 OUT_PATH = os.path.join("docs", "figures", "gap-closure.png")
 
-# Palette: muted gray for the no-help baseline, positive teal for the mechanism arm.
+# S6: the N-bar malformed-call figure (baseline / +error-recovery / +retry-nudge).
+MULTI_DATA_PATH = os.path.join("docs", "figures", "malformed-gap-data.json")
+MULTI_OUT_PATH = os.path.join("docs", "figures", "malformed-gap.png")
+
+# Palette: muted gray for the no-help baseline, positive teal for a mechanism that really lifts,
+# neutral steel for a mechanism whose gap straddles 0 (a null — colour follows the measured verdict,
+# never the hoped-for one, so the figure can't over-claim).
 BASELINE_COLOR = "#9e9e9e"
 MECHANISM_COLOR = "#2a9d8f"
+NULL_COLOR = "#9aa7b4"
+
+# Display names for the malformed figure's x-axis, keyed by arm label.
+ARM_DISPLAY = {
+    "baseline": "Baseline\n(no mechanism)",
+    "error_recovery": "+ Error-recovery\n(harness retry)",
+    "retry_nudge": "+ Retry-nudge\n(model re-prompt)",
+}
 
 
 # --- pure helpers (no matplotlib; unit-tested offline in test_chart.py) -------
@@ -78,6 +92,43 @@ def wilson_yerr(arm: dict) -> tuple[float, float]:
     out to that arm's Wilson bounds. A 100% bar has a one-sided whisker (upper = 0)."""
     lo, hi = arm["wilson"]
     return arm["rate"] - lo, hi - arm["rate"]
+
+
+# --- S6: pure helpers for the N-bar malformed figure (unit-tested offline) ----
+
+def is_win(arm: dict) -> bool:
+    """True if this arm has a measured gap vs baseline whose Newcombe interval clears 0 (a real
+    lift). The baseline arm (no `gap_vs_baseline`) and any null arm are False — this drives the
+    bar colour, so the figure shows a win only where the statistics actually support one."""
+    g = arm.get("gap_vs_baseline")
+    return bool(g and g["excludes_zero"])
+
+
+def gap_tag(arm: dict) -> str:
+    """Compact per-mechanism annotation: signed-pp delta, its Newcombe CI, and a real/null verdict."""
+    g = arm["gap_vs_baseline"]
+    lo, hi = g["newcombe"]
+    verdict = "real" if g["excludes_zero"] else "null"
+    return f"Δ {signed_pp(g['delta'])} pp\n{fmt_pp_ci(lo, hi)}\n→ {verdict}"
+
+
+def nudges_spent(s: dict) -> int:
+    """Total corrective re-prompts the retry-nudge arm issued (0 if there is no such arm)."""
+    for a in s["arms"]:
+        if a["label"] == "retry_nudge":
+            return a.get("nudges", 0)
+    return 0
+
+
+def multi_caption(s: dict) -> str:
+    """The load-bearing honesty caption for the malformed figure: the gap is INJECTED, error-recovery
+    structurally cannot fix a malformed call, and retry-nudge paid N model turns to do so."""
+    return (
+        f"N={s['n']} paired seeds  ·  malformed-call fault-rate {s['fault_rate']}  ·  "
+        f"temp {s['temperature']}  ·  {s['model']}\n"
+        f"gap is INJECTED (malformed-call testbed)  ·  error-recovery can't fix a malformed call  ·  "
+        f"retry-nudge spent {nudges_spent(s)} corrective re-prompts"
+    )
 
 
 # --- the figure (matplotlib; smoke-verified by running chart.py) --------------
@@ -147,6 +198,77 @@ def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
     return out_path
 
 
+def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH) -> str:
+    """Draw the S6 N-bar malformed-call ablation from an `arms`-shaped summary `s`; write `out_path`.
+
+    One completion-rate axis, one bar per arm (baseline / +error-recovery / +retry-nudge), each with
+    its Wilson whisker + k/N label. Bars are coloured by the measured verdict (teal = a real lift,
+    steel = a null), each mechanism carries its Newcombe gap vs the shared baseline, and the honesty
+    caption states the gap is injected. Holding the fault fixed and varying only the mechanism is what
+    makes the 'each guardrail fixes its own failure' story legible (DECISIONS D19)."""
+    import matplotlib
+    matplotlib.use("Agg")  # headless backend: render straight to a file, no display
+    import matplotlib.pyplot as plt
+
+    arms = s["arms"]
+    xs = list(range(len(arms)))
+    heights = [a["rate"] * 100 for a in arms]
+    lo_err = [wilson_yerr(a)[0] * 100 for a in arms]
+    up_err = [wilson_yerr(a)[1] * 100 for a in arms]
+    colors = [BASELINE_COLOR if i == 0 else (MECHANISM_COLOR if is_win(a) else NULL_COLOR)
+              for i, a in enumerate(arms)]
+
+    fig, ax = plt.subplots(figsize=(9.0, 5.8), dpi=150)
+    ax.bar(
+        xs, heights, width=0.58, color=colors, edgecolor="#333333", linewidth=1.0,
+        yerr=[lo_err, up_err], capsize=7,
+        error_kw=dict(ecolor="#222222", elinewidth=1.6, capthick=1.6),
+        zorder=3,
+    )
+
+    # Data label above each arm's upper whisker cap (% + k/N).
+    for xi, a in zip(xs, arms):
+        ax.text(xi, a["wilson"][1] * 100 + 2.5, bar_label(a),
+                ha="center", va="bottom", fontsize=11, fontweight="bold", color="#222222")
+
+    # Dashed baseline reference line across all arms.
+    base_top = arms[0]["rate"] * 100
+    ax.hlines(base_top, -0.45, len(arms) - 0.55, linestyles="dashed", color="#9e9e9e", lw=1.2, zorder=2)
+
+    # Per-mechanism gap annotation, low inside each bar, coloured + verdict-tagged.
+    for xi, a in list(zip(xs, arms))[1:]:
+        col = MECHANISM_COLOR if is_win(a) else NULL_COLOR
+        ax.text(xi, 4, gap_tag(a), ha="center", va="bottom", fontsize=9, color="#222222",
+                bbox=dict(boxstyle="round,pad=0.35", fc="#f7f7f7", ec=col, lw=1.2))
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels([ARM_DISPLAY.get(a["label"], a["label"]) for a in arms], fontsize=10.5)
+    ax.set_ylabel("Task completion rate", fontsize=12)
+    ax.set_ylim(0, 118)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_yticklabels([f"{t}%" for t in (0, 20, 40, 60, 80, 100)])
+    ax.set_xlim(-0.7, len(arms) - 0.3)
+    ax.yaxis.grid(True, color="#e9e9e9", lw=1.0)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+
+    # Title follows the measured verdict — a win only if some mechanism's gap actually clears 0.
+    any_win = any(is_win(a) for a in arms[1:])
+    suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
+                else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
+    fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.98)
+    ax.set_title("GLM-4.6 · multi-step tool task · injected MALFORMED-call testbed",
+                 fontsize=10, color="#666666", pad=10)
+    fig.text(0.5, 0.015, multi_caption(s), ha="center", va="bottom",
+             fontsize=8.5, color="#777777", style="italic")
+
+    fig.tight_layout(rect=(0, 0.07, 1, 0.95))
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def main() -> int:
     s = load_summary()
     out = build_figure(s)
@@ -156,6 +278,19 @@ def main() -> int:
     print(f"  baseline        {pct(s['baseline']['rate'])} ({s['baseline']['correct']}/{s['baseline']['n']})")
     print(f"  +error-recovery {pct(s['mechanism']['rate'])} ({s['mechanism']['correct']}/{s['mechanism']['n']})")
     print(f"  gap {signed_pp(g['delta'])}%  Newcombe {fmt_pp_ci(g['newcombe'][0], g['newcombe'][1])}  -> {verdict}")
+
+    # S6: render the malformed-call figure too, if its vendored data is present.
+    if os.path.exists(MULTI_DATA_PATH):
+        ms = load_summary(MULTI_DATA_PATH)
+        mout = build_multi_figure(ms)
+        print(f"wrote {mout}")
+        for a in ms["arms"]:
+            tail = ""
+            if "gap_vs_baseline" in a:
+                gg = a["gap_vs_baseline"]
+                v = "REAL" if gg["excludes_zero"] else "null"
+                tail = f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}"
+            print(f"  {a['label']:<16} {pct(a['rate'])} ({a['correct']}/{a['n']}){tail}")
     return 0
 
 

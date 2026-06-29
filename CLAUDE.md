@@ -22,32 +22,44 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `glm.py` — the minimal GLM-via-OpenRouter client (`chat()`, `MODEL`). The foundation
   everything builds on. Forwards `tools` / `tool_choice` / `temperature` straight through.
 - `agent.py` — the scenario-agnostic reason→act→observe loop + deterministic grading. ZERO
-  mechanisms *by default* (the bare baseline); S4 added one opt-in `recover` toggle (error-recovery:
-  a harness-level retry of transient faults) that stays off unless an arm turns it on. Pure
-  `dispatch()` + `dispatch_with_recovery()`; per-step JSONL trajectory plus a `grade` event.
+  mechanisms *by default* (the bare baseline); two opt-in arm toggles that stay off unless an arm turns
+  them on — `recover` (S4 error-recovery: a no-turn harness retry of *transient* faults) and `nudge`
+  (S6 retry-nudge: an explicit corrective re-prompt that costs a *model* turn, for *malformed* calls).
+  Pure `dispatch()` + `dispatch_with_recovery()` + `_nudge_message()`; per-step JSONL trajectory + a `grade` event.
 - `scenario.py` — the S2 lookup-then-compute task as data: a frozen `Scenario` (two chained
   lookup tools + a `submit_answer` terminal tool + known ground truth).
 - `oracle.py` — the deterministic grader (`grade()`): computed value vs known ground truth,
   never an LLM judge. Pure and unit-tested.
 - `verify.py` — smoke test proving chat + tool-calling work.
 - `test_oracle.py` — offline unit tests for the oracle, scenario ground truth, and `dispatch`.
-- `faults.py` — S3 deterministic mechanical-fault injector (`with_faults`): wraps a Scenario's
-  lookup tools to raise seeded transient 503s at a set rate. Non-mutating; `rate=0` ≡ clean task.
+- `faults.py` — deterministic mechanical-fault injectors. `with_faults` (S3): seeded *transient 503s* at
+  a set rate (error-recovery's target). `with_malformed_faults` (S6): a *malformed call* — an armed tool
+  rejects the documented param with a fixable `400 … use 'id' instead` hint; PERMANENT (not retryable) and
+  STICKY (only a corrected call clears it) — retry-nudge's target. Both non-mutating; `rate=0` ≡ clean task.
 - `runner.py` — the S3 N-trial runner (`run_arm`): loops one arm N times, reports raw k/N. S4 added a
   `run_kwargs` passthrough so an arm can toggle a mechanism (e.g. `{"recover": True}`).
 - `stats.py` — S4 proportion CIs: `wilson` (per arm), `newcombe_diff` (the gap between arms),
   `excludes_zero` (the honesty gate). Pure, unit-tested.
-- `ablation.py` — the S4 two-arm ablation harness: runs baseline vs +error-recovery over *identical*
-  seeded faults and prints the gap-closure delta with Wilson + Newcombe CIs and a verdict.
+- `ablation.py` — the ablation harness. `run_arms` (S6): runs *N* arms over identical seeded faults, each
+  with a Wilson CI + a Newcombe gap vs the baseline. `run_ablation` (S4) delegates to it but repackages
+  into the original 2-arm shape, so the S4/S5 figure stays byte-compatible. Arms are config
+  (`{label, run_kwargs}`): `BASELINE_ARM`, `RECOVERY_ARM`, `NUDGE_ARM`.
+- `malformed_ablation.py` — the S6 3-arm experiment: baseline / +error-recovery / +retry-nudge over the
+  malformed-call testbed. Measured a NULL on GLM-4.6 (the model self-corrects). `uv run malformed_ablation.py`.
+- `chart.py` — the deliverable renderer: `build_figure` (S5 2-bar gap-closure) + `build_multi_figure` (S6
+  N-bar; bar colour follows the *measured* verdict). Reads vendored `docs/figures/*-data.json`;
+  `uv run chart.py` regenerates both PNGs. No API, no model call.
 - `check_docs.py` — freshness check for the learning spine: flags any done stage missing from
   `docs/LEARNING.md`. Run `uv run check_docs.py`. A smoke alarm, not a commit gate.
-- `test_*.py` — offline, network-free suites (oracle, faults, runner, stats, recover, ablation),
-  each runnable with `uv run test_<name>.py`.
+- `test_*.py` — offline, network-free suites (oracle, faults, runner, stats, recover, ablation, chart,
+  malformed, nudge), each runnable with `uv run test_<name>.py`.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
 - `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
   why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
   `/wrap` recaps). Start here to catch up; see `docs/README.md`.
-- *(planned)* the **gap-closure chart** across arms (the final figure) + further guardrails (retry-nudge).
+- *(next)* the **natural-gap stretch** (DECISIONS D12): drop injected faults and harden the task until GLM
+  fails on its *own* mechanical merits, then re-run the guardrails. (S5 shipped the gap-closure chart; S6
+  added retry-nudge + a malformed-call fault and measured a *null* — GLM self-corrects malformed calls.)
 
 ## Methodology guardrails (load-bearing — do not drift)
 - **Deterministic oracle, never an LLM judge.** Task success is measured against known

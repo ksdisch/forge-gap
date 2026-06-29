@@ -39,10 +39,79 @@ from stats import excludes_zero, newcombe_diff, wilson
 DEFAULT_N = 40        # distinct seeds; the recommended operating point for a legible result (D15)
 DEFAULT_RATE = 0.6    # per-call fault probability; ~55-65% baseline leaves room above the CIs
 
-# The arms compared. Order matters: arm 0 is the baseline reference, arm 1 the mechanism.
-# Adding retry-nudge later is one more entry here + one more toggle in agent.run — no rewrite.
+# The arms, as config. Order matters: arm 0 is always the baseline reference; every later arm is
+# measured against it. An arm is just a label + the run_kwargs that toggle one mechanism on — exactly
+# the seam D11/D16 promised, now exercised by a THIRD arm-type (retry-nudge) at S6.
 BASELINE_ARM = {"label": "baseline", "run_kwargs": {"recover": False}}
 RECOVERY_ARM = {"label": "error_recovery", "run_kwargs": {"recover": True}}
+NUDGE_ARM = {"label": "retry_nudge", "run_kwargs": {"nudge": True}}  # S6: the model-turn corrector
+
+
+def run_arms(
+    model: str,
+    n: int,
+    fault_rate: float,
+    *,
+    arms: list[dict],
+    scenario: Scenario = ORDER_SCENARIO,
+    make_scenario=None,
+    fault_kind: str = "transient",
+    run_fn=agent_run,
+    runs_dir: str = "runs",
+    out_name: str = "arms-summary.json",
+    temperature: float = TEMPERATURE,
+    verbose: bool = True,
+    report: bool = True,
+    write: bool = True,
+) -> dict:
+    """Run N arms over the SAME seeded faults; return each arm's rate + Wilson CI and every
+    non-baseline arm's Newcombe gap vs `arms[0]` (the baseline reference).
+
+    This is the general harness behind the project's ablations. `make_scenario(i)` builds the
+    per-trial scenario (defaults to the transient-503 `with_faults`; S6 passes the malformed-call
+    builder). `run_fn` is the per-trial driver (tests inject a fake for offline CI-wiring checks).
+    Holds the fault fixed and varies only the mechanism per arm, so the gap is attributable to the
+    mechanism (DECISIONS D16). Emits an `arms`-shaped summary; `run_ablation` repackages the 2-arm
+    case into the legacy shape the S4/S5 figure reads.
+    """
+    if make_scenario is None:
+        def make_scenario(i: int) -> Scenario:
+            # Same fault pattern per trial index for EVERY arm -> a paired comparison.
+            return with_faults(scenario, rate=fault_rate, seed=i)
+
+    raw = [
+        run_arm(arm["label"], model, n, make_scenario=make_scenario, run_kwargs=arm["run_kwargs"],
+                run_fn=run_fn, runs_dir=runs_dir, temperature=temperature, verbose=verbose)
+        for arm in arms
+    ]
+
+    base = raw[0]
+    arm_summaries: list[dict] = []
+    for i, r in enumerate(raw):
+        lo, hi = wilson(r["correct"], r["n"])
+        entry = {
+            "label": r["label"], "correct": r["correct"], "n": r["n"], "rate": r["rate"],
+            "wilson": [lo, hi], "by_stop": r["by_stop"],
+            "recoveries": r.get("recoveries", 0), "nudges": r.get("nudges", 0),
+        }
+        if i > 0:  # every non-baseline arm gets a Newcombe interval vs the shared baseline
+            d, d_lo, d_hi = newcombe_diff(base["correct"], base["n"], r["correct"], r["n"])
+            entry["gap_vs_baseline"] = {"delta": d, "newcombe": [d_lo, d_hi],
+                                        "excludes_zero": excludes_zero(d_lo, d_hi)}
+        arm_summaries.append(entry)
+
+    summary = {
+        "model": model, "n": n, "fault_rate": fault_rate, "temperature": temperature,
+        "fault_kind": fault_kind, "baseline_label": base["label"], "arms": arm_summaries,
+    }
+    if write:
+        os.makedirs(runs_dir, exist_ok=True)
+        summary["summary_path"] = os.path.join(runs_dir, out_name)
+        with open(summary["summary_path"], "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+    if verbose and report:
+        _report_arms(summary)
+    return summary
 
 
 def run_ablation(
@@ -58,45 +127,33 @@ def run_ablation(
     temperature: float = TEMPERATURE,
     verbose: bool = True,
 ) -> dict:
-    """Run the baseline + mechanism arms over identical seeded faults; return rates + CIs.
+    """The S4 two-arm convenience: baseline vs one mechanism over identical transient faults.
 
-    `run_fn` is the per-trial driver (defaults to the real `agent.run`; tests inject a fake so the
-    aggregation + CI wiring can be verified offline, with no API calls). Writes an
-    `ablation-summary.json` under `runs_dir` and, if `verbose`, prints the gap-closure report.
+    A thin wrapper over `run_arms` that repackages the result into the original
+    `{baseline, mechanism, gap_closure}` summary shape the S4/S5 figure (`chart.py` + the vendored
+    `gap-closure-data.json`) reads — so generalizing to N arms didn't disturb the shipped deliverable.
+    Writes `ablation-summary.json` under `runs_dir` and, if `verbose`, prints the gap-closure report.
     """
-    def make_scenario(i: int) -> Scenario:
-        # Same fault pattern per trial index for BOTH arms -> a paired comparison.
-        return with_faults(scenario, rate=fault_rate, seed=i)
-
-    arms: dict[str, dict] = {}
-    for arm in (baseline, mechanism):
-        arms[arm["label"]] = run_arm(
-            arm["label"], model, n,
-            make_scenario=make_scenario, run_kwargs=arm["run_kwargs"],
-            run_fn=run_fn, runs_dir=runs_dir, temperature=temperature, verbose=verbose)
-
-    b, m = arms[baseline["label"]], arms[mechanism["label"]]
-    b_lo, b_hi = wilson(b["correct"], b["n"])
-    m_lo, m_hi = wilson(m["correct"], m["n"])
-    d, d_lo, d_hi = newcombe_diff(b["correct"], b["n"], m["correct"], m["n"])
-
+    s = run_arms(model, n, fault_rate, arms=[baseline, mechanism], scenario=scenario,
+                 fault_kind="transient", run_fn=run_fn, runs_dir=runs_dir,
+                 temperature=temperature, verbose=verbose, report=False, write=False)
+    b, m = s["arms"][0], s["arms"][1]
+    g = m["gap_vs_baseline"]
     summary = {
         "model": model, "n": n, "fault_rate": fault_rate, "temperature": temperature,
-        "baseline": {"label": baseline["label"], "correct": b["correct"], "n": b["n"],
-                     "rate": b["rate"], "wilson": [b_lo, b_hi], "by_stop": b["by_stop"],
-                     "recoveries": b.get("recoveries", 0)},
-        "mechanism": {"label": mechanism["label"], "correct": m["correct"], "n": m["n"],
-                      "rate": m["rate"], "wilson": [m_lo, m_hi], "by_stop": m["by_stop"],
-                      "recoveries": m.get("recoveries", 0)},
-        "gap_closure": {"delta": d, "newcombe": [d_lo, d_hi],
-                        "excludes_zero": excludes_zero(d_lo, d_hi)},
+        "baseline": {"label": b["label"], "correct": b["correct"], "n": b["n"],
+                     "rate": b["rate"], "wilson": b["wilson"], "by_stop": b["by_stop"],
+                     "recoveries": b["recoveries"]},
+        "mechanism": {"label": m["label"], "correct": m["correct"], "n": m["n"],
+                      "rate": m["rate"], "wilson": m["wilson"], "by_stop": m["by_stop"],
+                      "recoveries": m["recoveries"]},
+        "gap_closure": {"delta": g["delta"], "newcombe": g["newcombe"],
+                        "excludes_zero": g["excludes_zero"]},
     }
-
     os.makedirs(runs_dir, exist_ok=True)
     summary["summary_path"] = os.path.join(runs_dir, "ablation-summary.json")
     with open(summary["summary_path"], "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
-
     if verbose:
         _report(summary)
     return summary
@@ -127,6 +184,33 @@ def _report(s: dict) -> None:
               "Raise fault_rate and/or add distinct seeds.")
     print("=" * 66)
     print(f"  summary -> {s['summary_path']}")
+
+
+def _report_arms(s: dict) -> None:
+    """Print the N-arm report: every arm's rate + Wilson CI, then each mechanism's Newcombe gap
+    vs the shared baseline + a clears-zero / straddles-zero verdict (the honesty gate, D16)."""
+    base = s["arms"][0]
+    print("\n" + "=" * 72)
+    print(f"GAP-CLOSURE  ({s['fault_kind']} fault)   model={s['model']}   "
+          f"n={s['n']}   fault_rate={s['fault_rate']}")
+    print("-" * 72)
+    for a in s["arms"]:
+        extra = ""
+        if a["recoveries"]:
+            extra += f"   (harness recoveries: {a['recoveries']})"
+        if a["nudges"]:
+            extra += f"   (corrective nudges: {a['nudges']})"
+        print(f"  {a['label']:<16} {a['correct']:>3}/{a['n']:<3} = {_pct(a['rate']):>6}   "
+              f"95% CI [{_pct(a['wilson'][0])}, {_pct(a['wilson'][1])}]{extra}")
+    print("-" * 72)
+    for a in s["arms"][1:]:
+        g = a["gap_vs_baseline"]
+        verdict = "a real result — clears 0" if g["excludes_zero"] else "NULL — straddles 0"
+        print(f"  {a['label']:<16} vs {base['label']}: {g['delta']:+.1%}   "
+              f"Newcombe 95% CI [{g['newcombe'][0]:+.1%}, {g['newcombe'][1]:+.1%}]   -> {verdict}")
+    print("=" * 72)
+    if "summary_path" in s:
+        print(f"  summary -> {s['summary_path']}")
 
 
 def main(argv: list[str]) -> int:
