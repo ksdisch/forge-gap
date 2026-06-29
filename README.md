@@ -6,18 +6,19 @@ a smoke test that proves both **chat** and **tool-calling** work.
 
 ```
 forge-gap/
-├─ glm.py          # the reusable client: chat(), MODEL  ← import this in harness code
-├─ agent.py        # the reason→act→observe loop + deterministic grading
-├─ scenario.py     # the S2 lookup-then-compute task (2 tools + ground truth)
-├─ oracle.py       # the deterministic grader (never an LLM judge)
-├─ faults.py       # S3 seeded transient-503 fault injector (with_faults)
-├─ runner.py       # S3 N-trial runner (run_arm): raw k/N per arm
-├─ stats.py        # S4 Wilson + Newcombe confidence intervals
-├─ ablation.py     # S4 two-arm ablation: baseline vs +error-recovery, with CIs
-├─ chart.py        # S5 the deliverable: renders the gap-closure figure from saved numbers
-├─ verify.py       # smoke test: plain chat + one tool-calling round-trip
-├─ test_*.py       # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart)
-├─ docs/figures/   # the committed gap-closure chart (PNG) + its vendored data (JSON)
+├─ glm.py              # the reusable client: chat(), MODEL  ← import this in harness code
+├─ agent.py            # the reason→act→observe loop + grading (+ error-recovery / retry-nudge toggles)
+├─ scenario.py         # the S2 lookup-then-compute task (2 tools + ground truth)
+├─ oracle.py           # the deterministic grader (never an LLM judge)
+├─ faults.py           # fault injectors: S3 transient-503 (with_faults) + S6 malformed-call (with_malformed_faults)
+├─ runner.py           # S3 N-trial runner (run_arm): raw k/N per arm
+├─ stats.py            # S4 Wilson + Newcombe confidence intervals
+├─ ablation.py         # ablation harness: run_arms (N arms, S6) + run_ablation (2-arm legacy, S4), with CIs
+├─ malformed_ablation.py # S6 three-arm malformed-call ablation: baseline / +error-recovery / +retry-nudge
+├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap figures from saved numbers
+├─ verify.py           # smoke test: plain chat + one tool-calling round-trip
+├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge)
+├─ docs/figures/       # the committed gap-closure + malformed-gap charts (PNG) + their vendored data (JSON)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv + matplotlib)
@@ -128,6 +129,37 @@ Regenerate it from the vendored numbers — no API, no model call:
 ```bash
 uv run chart.py     # reads docs/figures/gap-closure-data.json -> docs/figures/gap-closure.png
 ```
+
+## 8. The boundary (S6 — retry-nudge, and where a guardrail stops helping)
+
+S4 measured one guardrail against one fault. S6 added the second guardrail — **retry-nudge** (re-prompt
+the *model* to fix and retry a failed call, costing a model turn) — and tested it against the fault it
+is built for: a **malformed call**, where the model's *own* call is wrong. A new injector
+(`with_malformed_faults`) rejects the documented parameter with an informative `400 … use 'id' instead`
+hint; it is *permanent* (so error-recovery's transient-only retry can't touch it) and *sticky* (only a
+genuinely corrected call clears it). Three arms run over the same malformed faults:
+
+![Malformed-call testbed — baseline, +error-recovery, +retry-nudge all 100% on GLM-4.6](docs/figures/malformed-gap.png)
+
+**The honest result is a null: no guardrail beats the baseline.** GLM-4.6 reads the hint *as a tool
+result* and corrects its own call on the next turn, completing **20/20 = 100%** with no mechanism at
+all. Error-recovery can't help (a malformed call isn't a transient one) and retry-nudge — though it
+fired **26** corrective re-prompts — adds nothing the model wasn't already doing: **+0.0%**, Newcombe
+95% CI **[−16.1%, +16.1%]**, which straddles 0. Reported as a null, per the honesty rule.
+
+That negative result is the point, and it sharpens S4: a guardrail earns its keep only where the model
+**can't help itself**. S4's +32.5% came specifically from *turn-exhaustion* — transient faults made GLM
+retry until it ran out of steps, and a no-turn harness retry rescued it. Malformed calls don't exhaust
+turns (GLM fixes them in one extra step), so neither guardrail moves the number. The matched-guardrail
+intuition has a boundary, and it's the model's own competence.
+
+```bash
+# needs your key in .env — real GLM calls (~N×3 trials); regenerate the figure with `uv run chart.py`
+uv run malformed_ablation.py z-ai/glm-4.6 20 0.6     # args: model, N distinct seeds, fault rate
+```
+
+Offline, the mechanism + fault are covered without API calls by `uv run test_malformed.py` and
+`uv run test_nudge.py`. The full reasoning is in `docs/DECISIONS.md` **D19**.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart

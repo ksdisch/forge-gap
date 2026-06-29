@@ -1,0 +1,72 @@
+{
+  "model": "z-ai/glm-4.6",
+  "n": 20,
+  "fault_rate": 0.6,
+  "temperature": 0.7,
+  "fault_kind": "malformed",
+  "baseline_label": "baseline",
+  "arms": [
+    {
+      "label": "baseline",
+      "correct": 20,
+      "n": 20,
+      "rate": 1.0,
+      "wilson": [
+        0.8388698745050667,
+        1.0
+      ],
+      "by_stop": {
+        "submitted": 20
+      },
+      "recoveries": 0,
+      "nudges": 0
+    },
+    {
+      "label": "error_recovery",
+      "correct": 20,
+      "n": 20,
+      "rate": 1.0,
+      "wilson": [
+        0.8388698745050667,
+        1.0
+      ],
+      "by_stop": {
+        "submitted": 20
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "gap_vs_baseline": {
+        "delta": 0.0,
+        "newcombe": [
+          -0.16113012549493333,
+          0.16113012549493333
+        ],
+        "excludes_zero": false
+      }
+    },
+    {
+      "label": "retry_nudge",
+      "correct": 20,
+      "n": 20,
+      "rate": 1.0,
+      "wilson": [
+        0.8388698745050667,
+        1.0
+      ],
+      "by_stop": {
+        "submitted": 20
+      },
+      "recoveries": 0,
+      "nudges": 26,
+      "gap_vs_baseline": {
+        "delta": 0.0,
+        "newcombe": [
+          -0.16113012549493333,
+          0.16113012549493333
+        ],
+        "excludes_zero": false
+      }
+    }
+  ],
+  "summary_path": "runs/malformed-ablation-summary.json"
+}

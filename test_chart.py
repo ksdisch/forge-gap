@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 
 from chart import (
+    MULTI_DATA_PATH,
     bar_label,
     caption,
     fmt_pp_ci,
@@ -158,6 +159,25 @@ def test_nudges_and_multi_caption() -> None:
           "error-recovery can't fix a malformed call" in cap)
 
 
+def test_vendored_malformed_matches() -> None:
+    print("vendored malformed data — the exact S6 null result (the figure's source of truth)")
+    s = load_summary(MULTI_DATA_PATH)
+    check("model == z-ai/glm-4.6", s["model"] == "z-ai/glm-4.6")
+    check("N == 20", s["n"] == 20)
+    check("fault_kind == malformed", s["fault_kind"] == "malformed")
+    check("fault_rate == 0.6", s["fault_rate"] == 0.6)
+    check("three arms, in order",
+          [a["label"] for a in s["arms"]] == ["baseline", "error_recovery", "retry_nudge"])
+    check("baseline 20/20 = 100%", s["arms"][0]["correct"] == 20 and s["arms"][0]["rate"] == 1.0)
+    check("error_recovery 20/20 = 100%", s["arms"][1]["correct"] == 20)
+    check("retry_nudge 20/20 = 100%", s["arms"][2]["correct"] == 20)
+    check("retry_nudge fired 26 nudges (the faults DID arm — it just didn't help)",
+          s["arms"][2]["nudges"] == 26)
+    check("error_recovery gap straddles 0 (null)", s["arms"][1]["gap_vs_baseline"]["excludes_zero"] is False)
+    check("retry_nudge gap straddles 0 (null)", s["arms"][2]["gap_vs_baseline"]["excludes_zero"] is False)
+    check("retry_nudge delta == 0.0", close(s["arms"][2]["gap_vs_baseline"]["delta"], 0.0))
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -170,6 +190,7 @@ def main() -> int:
         test_is_win,
         test_gap_tag,
         test_nudges_and_multi_caption,
+        test_vendored_malformed_matches,
     ):
         t()
         print()

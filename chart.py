@@ -253,8 +253,11 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH) -> str:
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
 
-    fig.suptitle("Each guardrail fixes its own failure",
-                 fontsize=14, fontweight="bold", y=0.98)
+    # Title follows the measured verdict — a win only if some mechanism's gap actually clears 0.
+    any_win = any(is_win(a) for a in arms[1:])
+    suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
+                else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
+    fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.98)
     ax.set_title("GLM-4.6 · multi-step tool task · injected MALFORMED-call testbed",
                  fontsize=10, color="#666666", pad=10)
     fig.text(0.5, 0.015, multi_caption(s), ha="center", va="bottom",

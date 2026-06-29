@@ -363,6 +363,81 @@ The caption word **INJECTED**. The bars show a big, real gap-closure — but it 
 
 ---
 
+## S6 — The second guardrail (retry-nudge) — and a measured null
+
+**What we built.** S6 added the project's *second* guardrail and the fault it's meant to fix — then
+measured it honestly and got a **null**, which turned out to be the interesting part.
+
+- **A new fault: the malformed call (`faults.py` → `with_malformed_faults`).** The S3 fault was a flaky
+  *service* (a transient 503 — the call is fine, the tool hiccups). A malformed call is a bad *call*: the
+  model used the wrong argument. An "armed" tool rejects the documented parameter (`order_id`) with an
+  informative hint — `400 … use 'id' instead` — and only a *corrected* call clears it. Two properties make
+  it the right test for retry-nudge: it's **permanent** (the error string isn't "retryable", so
+  error-recovery's harness-retry ignores it) and **sticky** (armed once per seed+tool, so a blind resend
+  keeps failing — only a genuine correction works). Why sticky? Because the 503 redraws a fresh coin each
+  call, so *any* resend clears it; a malformed call must require the caller to actually *change* the call,
+  or we'd be measuring luck instead of correction.
+- **A new guardrail: retry-nudge (`agent.py` → the `nudge` toggle).** On a failed tool call, the harness
+  appends one explicit corrective re-prompt ("that failed — don't repeat it, fix the arguments and call
+  again"). The load-bearing contrast with error-recovery: a nudge spends a **model turn** (the model
+  re-reasons), so it can fix a *malformed* call a blind harness retry never could — at the cost of a turn.
+- **A bigger harness + chart, same old figure.** Two arms became *N*: `ablation.run_arms` runs any list of
+  arms over one shared fault and gives each a Wilson CI + a Newcombe gap vs the baseline; `run_ablation`
+  now just calls it and repackages the result into the *exact* old 2-arm shape, so the S4/S5 chart and its
+  vendored data never moved (generalise at the seam, don't disturb what shipped). `chart.build_multi_figure`
+  draws *N* bars, coloured by the **measured verdict** (teal = a real lift, steel = a null) so the picture
+  can't over-claim.
+
+**The result — a clean null, and why that's the point.** Three arms on the malformed testbed (GLM-4.6,
+N=20): **baseline 100% · +error-recovery 100% · +retry-nudge 100%**. Both gaps **+0.0%**, Newcombe
+**[−16.1%, +16.1%]** → straddles 0 → null. The trajectories show why: GLM-4.6 reads the `use 'id'` hint
+*as a tool result* and corrects its own call on the very next turn, unaided — so the explicit nudge (which
+fired 26 times) has nothing to add, and error-recovery can't engage at all. A cheap **pilot** (N=6) caught
+this *before* we paid for the full run.
+
+**Teaching note.** Two ideas. **(1) A null is a result — sometimes the best one.** We didn't get a bar to
+brag about; we got a *boundary*: a guardrail earns its keep only where the model **can't help itself**.
+That even sharpens S4 — error-recovery's +32.5% wasn't "fixing errors" in general, it was rescuing
+**turn-exhaustion** (transient faults made GLM retry until it ran out of steps). Malformed calls don't
+exhaust turns, so no guardrail is needed. Knowing *why* a guardrail worked tells you exactly where it
+won't. **(2) De-risk an expensive measurement with a cheap one.** The N=6 pilot cost ~18 trials and told
+us the full run would be flat — spend a little to learn whether it's worth spending a lot, especially
+before burning API credits on a result you can preview.
+
+**New words.** *malformed call*, *sticky fault*, *permanent (non-retryable) error*, *self-correction*,
+*null result*, *guardrail specificity*, *N-arm ablation*, *pilot run*.
+
+**Recall — try before you reveal:**
+
+Q1. The 503 fault is a fresh coin-flip on every call, but the malformed fault is "sticky" — armed once per
+seed+tool. Why does retry-nudge *need* the malformed fault to be sticky?
+
+<details><summary>answer</summary>
+
+Because the whole point is to measure whether the model *corrects* its call. If the malformed fault redrew per call like the 503, a blind identical resend would clear it by luck — so a model that just repeats the same wrong call would "pass," and we'd be measuring chance, not correction. Sticky means only a genuinely *changed* (corrected) call succeeds, so a pass really reflects the model fixing its arguments — exactly the behaviour retry-nudge is supposed to encourage.
+
+</details>
+
+Q2. Error-recovery and retry-nudge are both "retry" guardrails. Why does error-recovery do *nothing*
+against a malformed call, while it closed a +32.5% gap against the 503?
+
+<details><summary>answer</summary>
+
+Error-recovery only retries *transient* errors (it checks the error string for "503 / timeout / retry"-style hints) and it re-calls the tool *identically*, spending no model turn. A 503 clears on an identical retry (the service just hiccupped). A malformed call is a *permanent* error — re-sending the identical wrong call fails again — and its `400 invalid_argument` string isn't classified as retryable, so error-recovery doesn't even try. Fixing it requires *changing* the call, which only the model can do (a model turn) — that's retry-nudge's job, not error-recovery's.
+
+</details>
+
+Q3. All three bars are at 100% — a null. Why is that still a worthwhile result, and what does it tell you
+about *when* a guardrail helps?
+
+<details><summary>answer</summary>
+
+It marks a boundary: a guardrail helps only where the model **can't help itself**. GLM-4.6 self-corrects malformed calls from the tool-error hint, so neither retry guardrail adds anything. That clarifies what S4 actually measured — error-recovery's +32.5% was specifically *turn-exhaustion* recovery (transient faults made the model retry until it ran out of steps), not a general "fixes errors" power. Malformed calls don't exhaust turns, so there's nothing to rescue. A measured null, reported honestly, is exactly the kind of result the project's honesty rule exists to protect.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -392,7 +467,7 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **arm** — one configuration under test in a run (a model, or baseline vs +error-recovery). In S4 an arm is *config* — `{label, run_kwargs}` — so the harness can drive several through one loop.
 - **arm-as-config** — representing an arm as data (a label + the kwargs that toggle its mechanism) rather than hard-coding it, so adding an arm is a list entry, not a rewrite.
 - **error-recovery** — the S4 guardrail: the *harness* retries a transient tool failure inside the same step, spending no model turn. The `recover=True` arm.
-- **retry-nudge** — a *different* guardrail (S5+): re-prompt the *model* to try again after a failure — which still costs it a turn. Built as a sibling toggle later.
+- **retry-nudge** — the S6 guardrail: re-prompt the *model* to fix and retry a failed call — which costs it a turn (vs error-recovery's no-turn harness retry). Built as the `nudge` toggle in `agent.py`. Against malformed calls on GLM-4.6 it measured a *null* — the model self-corrects unaided.
 - **harness-level retry** — a retry done by the surrounding code (the harness), not the model, so it consumes no reasoning turn. The mechanism behind error-recovery.
 - **max_recoveries** — the cap on how many harness-level retries one tool call may use before the loop gives up and feeds the error back to the model.
 - **Wilson interval** — the believable range for *one* proportion (an arm's pass-rate) given only N samples; stays inside [0, 1] and behaves near 0%/100%, where a ±std interval breaks.
@@ -413,3 +488,11 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **annotation** — text or an arrow added to a chart to call out a specific value (here, the +32.5% gap and its Newcombe interval).
 - **headless rendering (Agg)** — drawing a figure straight to an image file with no on-screen window (matplotlib's "Agg" backend), so it works in a script or on a server.
 - **DPI (dots per inch)** — the resolution of a saved image; higher DPI means more pixels and a crisper PNG.
+- **malformed call** — a tool call that is itself wrong (wrong parameter name/type, bad JSON), so the tool rejects it — as opposed to a *transient* fault, where the call is fine but the service hiccups. The S6 fault (`with_malformed_faults`).
+- **sticky fault** — a fault that recurs on an *identical* re-call, so only a genuinely *changed* call clears it (the malformed fault), versus a fresh per-call coin-flip (the 503) that any resend can clear.
+- **permanent / non-retryable error** — an error a blind retry can't fix (a malformed call, an unknown id); `agent._is_retryable` returns False for it, so error-recovery leaves it alone. Opposite of a transient error.
+- **self-correction** — the model fixing its own failed call after reading the tool's error (e.g. switching `order_id` → `id`), with no guardrail — the behaviour that made retry-nudge measure null on GLM-4.6.
+- **null result** — a measured difference whose confidence interval straddles 0, so you can't claim an effect; reported honestly as "no clear effect," never a win (the honesty gate).
+- **guardrail specificity** — each guardrail fixes its own failure type and not others (error-recovery↔transient turn-exhaustion, retry-nudge↔malformed) — and a guardrail helps only where the model can't self-correct.
+- **N-arm ablation** — running *N* arms (not just two) over one shared fault, each with a Wilson CI and a Newcombe gap vs the baseline (`ablation.run_arms`); generalises the S4 two-arm harness at the seam.
+- **pilot run** — a tiny, cheap trial run done first to de-risk a bigger, costlier one (the N=6 pilot that caught the S6 null before the full run).

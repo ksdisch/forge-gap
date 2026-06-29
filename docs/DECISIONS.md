@@ -329,7 +329,7 @@ it just means "what we decided and why, written down so future-you isn't confuse
 
 ---
 
-## D19 — S6 scope = the retry-nudge arm on a NEW malformed-call fault ⭐ *(start-of-stage brief; scope + fault design signed off 2026-06-29 — build in progress)*
+## D19 — S6 = the retry-nudge arm on a NEW malformed-call fault → a measured NULL ⭐ *(scope + fault design signed off 2026-06-29; built + measured 2026-06-29 — outcome in the **Measured result** note below)*
 
 This is a **start-of-stage brief** (written before the code, per the per-stage rhythm). It records
 the scope we locked, the design fork inside it, and one load-bearing honesty risk to weigh before
@@ -411,6 +411,33 @@ chart is flat. We handle this honestly, not by tuning for a win:
 - The **robust** part of the result holds regardless: **error-recovery ≈ baseline** on malformed calls
   is structural (a permanent error isn't retried), so S6 demonstrates **guardrail specificity** even in
   the worst case.
+
+### Measured result (S6): a clean NULL — GLM-4.6 self-heals malformed calls ⭐
+The pilot fired the predicted risk and the N=20 confirmation pinned it (seeds 0–19, rate 0.6):
+- **baseline 20/20 = 100%** · **+error-recovery 20/20 = 100%** · **+retry-nudge 20/20 = 100%** — and the
+  nudge arm *did* issue **26** corrective re-prompts, so the faults armed and the mechanism worked; it
+  just had no work to do.
+- Both gaps vs baseline: **+0.0%**, Newcombe 95% CI **[−16.1%, +16.1%]** → straddles 0 → a **null** by the
+  D16 gate. Reported as a null, not dressed up. All three Wilson intervals are [83.9%, 100%].
+- **Mechanism (verified in the trajectories):** GLM reads the `400 … use 'id' instead` hint *as a tool
+  result* and re-calls with the corrected parameter on its very next turn, unaided. So the explicit nudge
+  is redundant, and error-recovery is structurally inert (a permanent error is never retried).
+- **Why no honest tuning rescues it:** the nudge changes neither the *information* (the hint is already in
+  the tool result) nor the *turn economics* (self-correcting and nudge-then-correcting each cost one extra
+  turn), so raising the rate or trimming `max_steps` hurts both arms equally — they never separate. A win
+  would require weakening the hint's information, which would be dishonest (and would only floor both arms).
+- **The finding (the real deliverable):** a guardrail earns its keep only where the model *can't help
+  itself*. S4's +32.5% was specifically **turn-exhaustion** recovery — transient faults made GLM retry
+  until it ran out of steps, and a no-turn harness retry rescued it. Malformed calls don't exhaust turns
+  (GLM fixes them in one extra step), so neither guardrail moves the number. The "each guardrail fixes its
+  own failure" intuition has a boundary: the model's own competence. The figure
+  (`docs/figures/malformed-gap.png`, title auto-set from the verdict to *"On malformed faults, no guardrail
+  beats the baseline"*) and README §8 state this plainly.
+- **Process win (cheap de-risk):** the ~18-trial pilot caught the null *before* the full run — we spent ~60
+  trials total, not a wasted N=40×3, and still produced a rigorous, defensible negative result. The
+  apparatus (malformed fault + retry-nudge arm + N-arm harness + N-bar chart) is reusable for future
+  models/faults.
+- **Reproduce:** `uv run malformed_ablation.py z-ai/glm-4.6 20 0.6` (writes `runs/malformed-ablation-summary.json`).
 
 ### Plain-English terms
 - *malformed call* = the model's tool call is itself wrong (wrong parameter name/type, bad JSON), so
