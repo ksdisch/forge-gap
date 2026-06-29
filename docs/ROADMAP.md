@@ -6,6 +6,29 @@ ending in a "gap-closure" chart with honest confidence intervals.
 
 Stages are labelled **S0, S1, S2, …** — each is roughly one build session.
 
+### Phase map — at a glance
+
+```mermaid
+flowchart TB
+    S0["S0 · Foundation<br/>GLM client + tool-calling smoke test"]:::done
+    S1["S1 · Bare agent loop<br/>the no-help baseline"]:::done
+    S2["S2 · Real task + oracle<br/>chained lookup · deterministic grading"]:::done
+    S3["S3 · Gap diagnostic<br/>20/20 clean → inject faults honestly"]:::done
+    S4["S4 · Error-recovery arm + CIs<br/>67.5% → 100% = +32.5% ✓ (a real win)"]:::done
+    S5["S5 · Gap-closure chart<br/>the deliverable figure"]:::done
+    S6["S6 · Retry-nudge + malformed fault<br/>measured NULL — GLM self-corrects"]:::done
+    G["NEXT — the goal<br/>Natural-gap stretch · D12<br/>harden the task, find GLM's own failures"]:::goal
+    F["S7–S12 · planned<br/>further guardrails / fault types"]:::planned
+
+    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> G --> F
+
+    classDef done fill:#2a9d8f,stroke:#1d6f66,color:#ffffff;
+    classDef goal fill:#e9c46a,stroke:#b8902f,color:#222222,stroke-width:2px;
+    classDef planned fill:#eeeeee,stroke:#9e9e9e,color:#555555;
+```
+
+**Legend:** 🟩 shipped (S0–S6) · 🟨 next — the goal · ⬜ planned (S7–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls, so no guardrail beats baseline). The detailed table below is the source of truth; this map is its at-a-glance view.
+
 | Stage | What it does (plain English) | Why it exists | Status |
 |-------|------------------------------|---------------|--------|
 | **S0** | Stands up the foundation: a tiny client (`glm.py`) that talks to GLM-4.6, plus a smoke test (`verify.py`) proving both plain chat **and** tool-calling work. | You can't build an agent until the connection — especially tool-calling — is proven. | ✅ done |
