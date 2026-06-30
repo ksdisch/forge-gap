@@ -438,6 +438,77 @@ It marks a boundary: a guardrail helps only where the model **can't help itself*
 
 ---
 
+## S7 — The natural-gap hunt: does GLM break on its own? (a measured no)
+
+**What we built.** S7 chased the project's headline goal (DECISIONS D12): stop *injecting* faults and
+instead **harden the task itself** until GLM-4.6 fails on its own mechanical merits — then see whether the
+existing guardrails close that *natural* gap. Three pieces, all **pilot-gated** so we'd spend little before
+learning anything:
+
+- `scenario_hard.py` — a **hardened task**, built as a new `Scenario` so the frozen S2 task (and the shipped
+  S5 figure) stays untouched. *v1:* a 4-lookup chain — `find_orders` (the customer has several orders, so the
+  model must **disambiguate** by zone) → `get_order` → `get_ship_rate` → `get_customer_discount` — through 15
+  look-alike records (`ORD-204` / `ORD-240` / `ORD-024`…). *v2 (the escalation):* a deeper 5-lookup chain
+  (adds a per-zone tax) through ~25 records with a **near-duplicate-customer** distractor ("Globex" vs "Globex
+  Labs", each with its own EAST order). The arithmetic stays trivial on purpose — every added difficulty is a
+  place to thread/pick the *wrong value* (mechanical), not to out-think hard math (cognitive).
+- `pilot.py` — a **clean** (no injected faults), bare-baseline runner: the cheap de-risk that asks one
+  question — *does the hardened task break GLM, and of what type?* — before any full experiment.
+- `test_scenario_hard.py` — 40+ offline checks (ground truths 82 and 117, unique targets, the distractor, the
+  full tool chains, wiring) so the scenario is proven correct before a single API call.
+
+**The result — a measured "no".** v1 pilot: **8/8 = 100%**. Per a pre-agreed **bounded escalation** (push
+difficulty up *once*; if GLM still scores ≥7/8, stop — no endless chase), v2 pilot: **8/8 = 100%** again.
+Every run submitted the exact ground truth. So we **declared done**. Across four independent probes — 20/20
+clean (S3), self-heals malformed (S6), 8/8 hard-v1, 8/8 hard-v2 (S7) — **GLM-4.6 shows no measurable natural
+gap at reasonable mechanical difficulty.** To study guardrails on this model you must *inject* faults, exactly
+as S3–S6 did and disclosed.
+
+**Teaching note.** Two ideas worth keeping. **(1) Guardrails are *typed* — and a strong model's natural
+failures are the wrong type for the ones we have.** Error-recovery fixes *transient* errors; retry-nudge fixes
+*malformed* calls. Both only ever fire on a tool-call **error**. But when a hard task breaks a strong model, it
+usually does so by **submitting a wrong number with no error at all** (wrong record, wrong field, a dropped
+term) — a *validation* gap that neither guardrail can even see. So "harden the task and re-run the guardrails"
+was structurally unlikely to produce a win even *if* GLM had slipped: a found natural gap would have reopened
+"should we build a *third* (validation) guardrail?", not rescued the two we have. Knowing the *type* of failure
+a tool fixes tells you, in advance, which gaps it can't touch. **(2) A pre-committed stop rule turns a chase
+into a decision.** "Hunt for a gap" has no natural end — you can always make a task harder. Writing the stop
+down in advance ("escalate *once*; ≥7/8 → declare done") let a *negative* result be a clean, honest finish
+instead of an open-ended money pit. A confident "it doesn't break, and here's the evidence" is a result.
+
+**New words.** *natural gap*, *validation gap / guardrail*, *failure triage*, *bounded escalation*, *at
+ceiling*, *robustness signal*.
+
+**Recall — try before you reveal:**
+
+Q1. We hardened the task hoping GLM would fail "mechanically." Even if it *had* failed, why would the existing
+guardrails (error-recovery, retry-nudge) probably still measure a null?
+
+<details><summary>answer</summary>
+
+Because both guardrails only fire on a tool-call *error* (transient → error-recovery; malformed → retry-nudge). A hard task's natural failures are mostly *wrong-answer-no-error* — the model picks the wrong record/field or drops a term and submits a wrong number, with no error to trigger anything. That's a *validation* gap, which neither existing guardrail can see. So a found natural gap would have pointed to a new (validation) guardrail, not rescued the two we have.
+
+</details>
+
+Q2. The v1 pilot was 8/8. Why escalate to v2 instead of either declaring done immediately or chasing harder and
+harder?
+
+<details><summary>answer</summary>
+
+A single difficulty proves little, but an open-ended "make it harder until it breaks" is a money pit. So we pre-committed a *bounded escalation*: push difficulty up exactly once (v2: deeper chain + more confusable records + a distractor), then apply a hard stop — if GLM still scores ≥7/8, declare done. v2 was 8/8, so we stopped. The rule turns "when do we give up?" from a sunk-cost judgment in the moment into a decision made in advance.
+
+</details>
+
+Q3. S7 found *no* gap. In what sense is that a real, defensible result for the project rather than a failure?
+
+<details><summary>answer</summary>
+
+It's the honest cap on the headline goal: across four probes GLM-4.6 doesn't produce a measurable natural gap at reasonable mechanical difficulty, so the *only* honest way to study reliability guardrails on this model is to inject faults — which is exactly what S3–S6 did and disclosed. The injected fault-recovery testbed (error-recovery's +32.5% real lift, retry-nudge's honest null) is therefore the project's legitimate deliverable, and "a strong open model is robust here" is itself a finding worth stating plainly.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -496,3 +567,9 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **guardrail specificity** — each guardrail fixes its own failure type and not others (error-recovery↔transient turn-exhaustion, retry-nudge↔malformed) — and a guardrail helps only where the model can't self-correct.
 - **N-arm ablation** — running *N* arms (not just two) over one shared fault, each with a Wilson CI and a Newcombe gap vs the baseline (`ablation.run_arms`); generalises the S4 two-arm harness at the seam.
 - **pilot run** — a tiny, cheap trial run done first to de-risk a bigger, costlier one (the N=6 pilot that caught the S6 null before the full run).
+- **natural gap** — a model failing on a *clean* task (no injected faults) because the task is genuinely hard, as opposed to the *injected* gaps of S3–S6. S7 hunted one on GLM-4.6 and found none.
+- **validation gap / guardrail** — a *validation gap* is a failure where the model submits a *wrong answer with no error* (wrong record/field, a dropped term); a *validation guardrail* would check the answer's correctness/consistency before accepting it. Neither error-recovery nor retry-nudge (which fire only on tool *errors*) can close a validation gap.
+- **failure triage** — hand-reading a run's trajectory to classify *why* it failed (transient error / malformed call / wrong-answer-no-error / no-submit / max-steps), not just that it did.
+- **bounded escalation** — a pre-committed rule allowing task difficulty to be raised only a fixed number of times, with a hard stop (S7: escalate once; if GLM still scores ≥7/8, declare done) — so a gap hunt can't become an open-ended chase.
+- **at ceiling** — scoring at (or statistically indistinguishable from) 100%, leaving no room to measure an improvement; GLM-4.6 is at ceiling on both the clean and the hardened tasks.
+- **robustness signal** — an independent observation that a model handles a task class without help; S7 collected four (20/20 clean, self-heals malformed, 8/8 hard-v1, 8/8 hard-v2).

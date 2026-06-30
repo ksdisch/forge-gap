@@ -450,3 +450,118 @@ The pilot fired the predicted risk and the N=20 confirmation pinned it (seeds 0�
 - *guardrail specificity* = each guardrail fixes its own failure type and not others (error-recovery↔
   transient, retry-nudge↔malformed) — the thing the 3-bar chart is built to show.
 - *pilot* = a tiny, cheap trial run done first to de-risk a bigger, costlier one.
+
+---
+
+## D20 — S7 = the natural-gap hunt (Option B), de-risked by a pilot; harden via longer-chain + bigger-record-set ⭐ *(scope + lever + pilot design signed off 2026-06-29; pilot result in the **Measured result** note below)*
+
+This is a **start-of-stage brief** (written before the code, per the per-stage rhythm). It records the
+scope we locked, the lever chosen to harden the task, the load-bearing insight that reshapes how the hunt
+must run, and the pre-committed routing rule so the pilot result is honest either way.
+
+- **The choice (signed off):** make S7 the **natural-gap hunt** (DECISIONS D12's headline prize): drop the
+  injected faults and **harden the task itself** until GLM-4.6 fails on its *own* mechanical merits, then
+  re-run the existing guardrails to see if they close that *natural* gap. De-risked by a cheap **pilot
+  first** — the same move that paid off in S6.
+- **Scope options weighed:** (A) **declare done** — treat the S5 chart (+32.5% real) + the S6 null as the
+  finished, honest deliverable · (B) **hunt the natural gap, pilot-gated** ✅ · (C) **hunt + pre-commit to a
+  third guardrail** (a validation/self-check step) if the natural failure is a type the current guardrails
+  can't catch.
+- **Why (B):** it's the project's own rule — *prove a gap exists before building any guardrail to recover
+  from it* (D6) — and the binding constraint here is the **statistics (noise floor), not the code**, so the
+  highest-value next dollar is a small spend to learn whether a natural gap even exists. B keeps a pre-agreed
+  honest off-ramp: if the pilot finds nothing we fall back to A *with evidence* ("even a hardened task
+  doesn't break GLM"), not a shrug. C is the same bet with more chips down — deferred until the pilot shows
+  the gap's *type* actually warrants a new guardrail (we don't build C blind).
+
+### The load-bearing insight (this reshapes how B must run)
+Our two guardrails only ever fire on a **tool-call error**: error-recovery retries a *transient* error
+(503/timeout — no model turn); retry-nudge re-prompts the model to fix a *malformed* call (one model turn).
+But a genuinely hard task most often breaks a *third* way — GLM threads the wrong field, picks the wrong
+record, or fumbles the total and **submits a wrong number with no error at all**. Mapping each natural
+failure type to what (if anything) we own that can close it:
+
+| Natural failure type | Guardrail that can close it |
+| --- | --- |
+| Transient tool error (503/timeout) | error-recovery — but a *natural* task has no flaky service; only appears under injection |
+| Malformed / wrong-param call | retry-nudge — but **S6 showed GLM self-heals these in one turn → null** (D19) |
+| **Wrong answer, no error** (wrong field/record/total) | **none — needs a *validation* guardrail = Option C** |
+| Never submits / runs out of steps | retry-nudge *might* refocus a flailing run; otherwise none |
+
+So the honest expectation: hardening a strong model most often lands in **row 3 — a "validation gap" that
+pure-B cannot close.** That isn't a reason to skip B; it's the reason the pilot exists — to tell us *which
+row we're in* before spending on a full N≥20 experiment.
+
+### The lever (signed off): longer chain + bigger, confusable record set
+- **Options weighed:** (1) **longer chain** — 3–4 *chained* lookups (add order→customer→discount; total =
+  items + shipping − discount) ✅ · (2) **bigger / confusable records** — ~15 orders with look-alike ids,
+  asked *by description* not exact id, so the model must disambiguate ✅ · (3) **trickier arithmetic** —
+  **rejected: off-thesis**, it manufactures *cognitive* (can't-reason-it) failures, the wrong kind
+  (scenario.py deliberately keeps the math trivial) · (4) **stricter tool params** — **rejected: ~re-runs
+  S6** (GLM self-heals malformed calls → likely null).
+- **Chosen: 1 + 2 together** as "hard task v1." Both produce *mechanical* failures (the on-thesis kind), and
+  a longer chain through a confusable record set naturally yields a *mix* of unknown-id **errors** and
+  wrong-**answers**, so the pilot's triage cleanly reveals which row above we land in. Stacking two levers is
+  fine for a pilot — the goal is *detection, not attribution*; if it breaks we can pare back.
+- **Built as a NEW scenario** (`scenario_hard.py`), leaving the frozen `ORDER_SCENARIO` (and the shipped S5
+  figure + its tests) untouched. `MAX_STEPS` scales up with the chain length so a "miss" means *got it
+  wrong*, never *ran out of room* (a budget artifact ≠ a natural failure).
+
+### The pilot (the de-risk Kyle approved)
+- **Bare baseline only** (`recover=False, nudge=False`), **clean** (no fault injection), **N=8**, GLM-4.6,
+  temp 0.7. The gating question is just *"does a gap exist, and of what type?"* — guardrail arms are
+  premature until we know the type. ~a few cents, ~2–3 min.
+- **Hand-read every miss** and classify it by the table above (failure triage).
+- **Pre-committed routing rule (so the result is honest either way):**
+  - GLM still ~aces it (no gap) → **A (declare done)** with evidence; optionally one stronger lever first.
+  - Gap, **tool-error** type → **full B**: re-run the existing guardrails, measure with Wilson/Newcombe + a chart.
+  - Gap, **wrong-answer** type → **stop and bring Kyle the A-vs-C decision** (pure-B would null; closing it
+    needs a validation guardrail = C). Never build C silently.
+
+### Measured result (S7 pilot): hardened task v1 — GLM-4.6 aces it 8/8, NO natural gap
+The cheap de-risk did its job and gave a clean signal. On the bare baseline, clean (no injected faults),
+**GLM-4.6 scored 8/8 = 100%** on "hard task v1" (N=8, temp 0.7, max_steps=12). Every run **submitted 82**
+(the exact ground truth) — so GLM disambiguated the right Globex/EAST order out of 15 look-alike records,
+threaded the 4-lookup chain, and computed `90 + 12 − 20` correctly every time. **Zero misses** to triage —
+no natural gap surfaced at this difficulty.
+- This is the **third** independent signal that GLM-4.6 is robust at multi-step mechanical tool use: 20/20
+  on the clean S2 task (S3), self-heals malformed calls (S6), and now 8/8 on a longer, confusable task (S7).
+- **Routing (per the rule above):** no gap → **A (declare done)** *or* **escalate the lever once** (a harder
+  pilot). Brought to Kyle, who chose to **escalate once** (hard task v2) — resolved below. (Even a gap found
+  by escalating would most likely be the row-3 *wrong-answer* type, which reopens the A-vs-C question
+  rather than rescuing pure-B.)
+- **Cost:** prompt 21,452 / completion 3,205 tokens, ~1 minute — a trivial spend for a decisive answer.
+- **Reproduce:** `uv run pilot.py` (clean baseline, hardened task); `uv run test_scenario_hard.py` (offline).
+
+### Escalation (hard task v2) + final resolution: declare done ⭐
+Per the bounded-escalation rule, we pushed difficulty up once more — "hard task v2": a **5-lookup** chain
+(added a per-zone tax → total = item + shipping + tax − discount) through **~25 records** with a
+**near-duplicate-customer** distractor ("Globex" vs "Globex Labs", each with its own EAST order). Clean
+baseline, N=8.
+- **Result: 8/8 = 100% again** — every run submitted the exact ground truth (117). GLM disambiguated the
+  right customer *and* order, threaded all five lookups, and computed `120 + 12 + 5 − 20` every time.
+- **Resolution (the stop rule fires): declare done (route A).** ≥7/8 was the pre-agreed stop, so we stop —
+  no endless chase. S7's deliverable is this **negative result**, stated plainly.
+- **The finding:** across four independent probes — 20/20 clean (S3), self-heals malformed (S6), 8/8 hard-v1,
+  8/8 hard-v2 (S7) — **GLM-4.6 shows no measurable *natural* gap at reasonable mechanical difficulty.** To
+  study reliability guardrails on this model you must *inject* faults — exactly what S3–S6 did, and disclosed.
+  The injected fault-recovery testbed (+32.5% real for error-recovery, an honest null for retry-nudge) stands
+  as the project's legitimate, honest deliverable.
+- **Why we didn't push further (honesty):** cranking difficulty until a strong model finally slips tends to
+  manufacture either *cognitive* failures (off-thesis — the model can't reason it) or *wrong-answer-no-error*
+  (validation) failures the existing guardrails can't close anyway (row 3 above). Neither rescues pure-B, so
+  more escalation would spend money to *weaken*, not strengthen, the honest story.
+- **Reproduce:** `uv run pilot.py v2` (clean baseline, hard task v2); both pilots are offline-guarded by
+  `uv run test_scenario_hard.py`.
+
+### Plain-English terms
+- *natural gap* = GLM failing on a **clean** task (no injected faults) just because the task is genuinely
+  hard — as opposed to the *injected* gaps of S3–S6.
+- *validation guardrail* = a check that the model's **answer** is right (or self-consistent) before
+  accepting it — catches *wrong-answer-no-error* failures that error-recovery and retry-nudge (which only
+  see tool errors) structurally cannot.
+- *failure triage* = hand-reading a run's step-by-step trajectory to classify *why* it failed, not just
+  that it did.
+- *on-thesis failure* = a **mechanical** breakdown of a step (wrong field threaded, wrong record, skipped
+  link) — the failure class this project measures — versus a *cognitive* one (the model can't reason the
+  task), which the task design deliberately avoids.
