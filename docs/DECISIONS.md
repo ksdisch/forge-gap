@@ -565,3 +565,106 @@ baseline, N=8.
 - *on-thesis failure* = a **mechanical** breakdown of a step (wrong field threaded, wrong record, skipped
   link) — the failure class this project measures — versus a *cognitive* one (the model can't reason the
   task), which the task design deliberately avoids.
+
+## D21 — S8 = weak-model natural-gap experiment → pivoted to a NEW *submit-nudge* guardrail on mistral-nemo ⭐ *(scope signed off 2026-06-30; two pilot-gated forks resolved live; measured result appended below after the run)*
+
+This is a **start-of-stage brief** (per the per-stage rhythm), but S8's brief **evolved through two pilot-gated
+forks** — the rhythm working as intended: a cheap pilot before each commit kept us honest as the model
+surprised us. It records what we locked, what the pilots found, and why S8 became a *new guardrail* stage.
+
+### The original choice (signed off 2026-06-30)
+S7 proved GLM-4.6 has **no natural gap**. S8's move: hold the task fixed and **swap in a weaker model**, then
+run the existing arms on the **clean** task — the variable we flip is the *model's capability*, so the claim is
+the **capability × guardrail interaction**, not "GLM needs guardrails."
+- **Scope options weighed:** (A) **MVP** — one weak model, pilot-gated 3-arm clean ablation + the N-bar chart
+  ✅ · (B) **capability ladder** — 2–3 models → a "lift-vs-capability" curve (richer, ~2–3× cost; deferred).
+- **Model (signed off):** scouted OpenRouter (254/338 models are tool-capable; the *tiny* 1–3B models don't
+  even expose tool-calling, so the degenerate-0% floor partly self-avoids). Picked
+  **`meta-llama/llama-3.1-8b-instruct`** first — canonical, cheap ($0.02/0.03 /Mtok), the most defensible
+  "weak vs GLM" story — with a fit-pilot rule to ladder up/down.
+
+### What the pilots found (the load-bearing pivot)
+The fit pilots (N=8, clean) did **not** land in the pre-registered "malformed tool call" sweet spot — they
+revealed a **capability cliff** with two *different* non-tool-error failure modes, both scoring **0/16** and
+both **invisible to the existing arms**:
+
+| Model | Computes 158? | Submits? | Natural failure (→ maps to D20's table) |
+| --- | --- | --- | --- |
+| Llama-3.1-8B | ❌ hallucinates (even submits formula strings) | yes — garbage (`1234.56`, `10.0`) | **validation gap** — wrong answer, no error (D20 **row 3**) |
+| mistral-nemo (12B) | ✅ yes (`158`) | ❌ narrates "calling submit_answer…" then stops | **protocol gap** — right answer, never calls the tool (D20 **row 4**) |
+
+Neither is a *transient* fault (error-recovery's target) or a *failed/malformed* call (retry-nudge's target),
+so a 3-arm run on either would be an **uninteresting triple-null**. Per the pre-agreed rule, the second
+bifurcation → stop and re-point.
+
+### The pivot (signed off 2026-06-30): build a *submit-nudge* guardrail, ablate mistral-nemo
+mistral-nemo's failure is the **most recoverable one possible** — the model is *right*; it just doesn't pull
+the terminal trigger. This is exactly **D20's row 4** ("never submits → *might* refocus, otherwise none"), now
+given its targeted guardrail.
+- **The mechanism (new):** **submit-nudge** — when a turn ends in prose with **no submission yet**, re-prompt
+  *"you haven't called submit_answer; do it now"* and continue (instead of ending as `no_submit`). A model
+  turn, like retry-nudge — but fired on a *missing terminal call*, not a *failed* one.
+- **The experiment — guardrail specificity** (a clean 3-arm ablation on mistral-nemo):
+
+  | Arm | Expectation | Why |
+  | --- | --- | --- |
+  | baseline | ~0–12% | knows `158`, won't submit |
+  | +retry-nudge | ≈ baseline (**null**) | only fires on a *failed* call; a no-submit isn't one |
+  | **+submit-nudge** | **real lift** | re-prompt → emits the call it already intended |
+
+  The point isn't just a bar — it's the project's through-line: **a guardrail helps only where it matches the
+  failure** (S4 recovery fixed turn-exhaustion; S6 nudge nulled on self-healing; S8 submit-nudge fixes
+  no-submit while retry-nudge nulls *in the same run*).
+- **Options weighed at the pivot:** (1) **submit-nudge on mistral-nemo** ✅ · (2) **validation guardrail on
+  Llama-8B** — the parked idea (recompute from fields, reject mismatches); bigger build, noisier testbed →
+  **parked to ROADMAP as a separate research task** · (3) **keep laddering models** — rejected; two
+  bifurcations make a naturally-malformed-call model look rare.
+- **Honesty caveat (goes in the chart caption):** part of mistral-nemo's no-submit is it *asking* "shall I
+  submit?", and our one-shot harness ends on prose — so the submit-nudge is partly the harness replying "yes,
+  go." A real failure and a real guardrail, stated plainly; and the gap is **natural** (no injection), unlike
+  S3–S6.
+
+### The pilot (the de-risk)
+- **submit-nudge arm on mistral-nemo, N=8, clean.** Gate: does it lift completion materially over baseline
+  (and does retry-nudge stay ~null)? Hand-read to confirm the lift is genuine `158` submissions, not
+  artifacts. ~pennies. Only on a clean lift do we spend the full N≥20.
+
+### Plain-English terms
+- *submit-nudge* = a guardrail that re-prompts the model to call the **terminal** tool when a run ends without
+  submitting (vs *retry-nudge*, which re-prompts after a **failed** tool call).
+- *protocol gap* = the model has the right answer but fails the **interaction protocol** — here, never
+  emitting the `submit_answer` tool call (narrating it as prose instead).
+- *guardrail specificity* = a guardrail closes a gap **only when it matches the failure mode**; the wrong
+  guardrail nulls (the in-experiment control).
+- *bifurcation / capability cliff* = a task where models either **ace it** (too strong → no gap) or **fail
+  wholesale** (too weak → 0%), with a narrow/empty "fails a *little*, mechanically" band between.
+
+### Measured result (S8): submit-nudge closes the natural no-submit gap (+75 pp, REAL) ⭐
+The pilot's signal held at scale. On the **clean** task (no injection), **mistral-nemo**, **N=20**, temp 0.7:
+
+| Arm | Completion | Wilson 95% CI | Gap vs baseline (Newcombe 95% CI) | Verdict |
+| --- | --- | --- | --- | --- |
+| baseline | 0/20 = 0.0% | [0.0%, 16.1%] | — | 17 stalled (no-submit), 3 wrong (`140`) |
+| +retry-nudge | 0/20 = 0.0% | [0.0%, 16.1%] | +0.0 pp [−16.1, +16.1] | **NULL** — fired **0** nudges (a no-submit is not a *failed* call) |
+| **+submit-nudge** | **15/20 = 75.0%** | **[53.1%, 88.8%]** | **+75.0 pp [+47.8, +88.8]** | **REAL — clears 0** (fired **15** submit-nudges) |
+
+- **A real result by every gate:** the Newcombe interval clears 0, *and* the two Wilson bars don't overlap
+  (baseline ≤16.1% vs submit-nudge ≥53.1%). Figure: `docs/figures/weak-gap.png` (README §9).
+- **Guardrail specificity, in one experiment:** the *wrong* guardrail (retry-nudge) does literally nothing —
+  it never fires, because the failure isn't a *failed* call but a *missing* one. Only the *matched* guardrail
+  (submit-nudge) lifts. Same lesson as S4 (recovery↔turn-exhaustion) and S6 (nudge↔malformed, a null) — now on
+  a **natural** gap.
+- **The honest residual:** submit-nudge converted **all 17 stalls** into submissions (0 no-submit left), but
+  5/20 of those were the model's `140` under-compute (item total, shipping forgotten) — a **validation** miss
+  submit-nudge structurally can't fix. So the natural gap has two layers: a *protocol* gap (no-submit) that
+  submit-nudge closes, and a residual *validation* gap that motivates the parked next experiment (ROADMAP
+  "Parked").
+- **The framing (honesty):** the gap is **natural** (the weak model's own failure on a clean task — no
+  injection), unlike S3–S6's injected gaps. The caveat, stated on the figure: part of the no-submit is
+  mistral-nemo *asking* "shall I submit?", and our one-shot harness ends on prose — so submit-nudge is partly
+  the harness replying "yes." A real failure and a real guardrail. The claim is the **capability × guardrail
+  interaction**: a weak-but-tool-capable model needs a guardrail GLM-4.6 (S6/S7) did not.
+- **Infra note:** mistral-nemo's OpenRouter route rate-limits (429); we let the SDK ride it out
+  (`max_retries=8` in `glm.py`) so a blip doesn't abort an arm — HTTP hygiene, not a measured mechanism.
+- **Reproduce:** `uv run weak_ablation.py mistralai/mistral-nemo 20` (live); `uv run test_submit_nudge.py` +
+  `uv run test_chart.py` (offline). All **eleven** offline suites green.

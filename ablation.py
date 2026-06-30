@@ -45,6 +45,7 @@ DEFAULT_RATE = 0.6    # per-call fault probability; ~55-65% baseline leaves room
 BASELINE_ARM = {"label": "baseline", "run_kwargs": {"recover": False}}
 RECOVERY_ARM = {"label": "error_recovery", "run_kwargs": {"recover": True}}
 NUDGE_ARM = {"label": "retry_nudge", "run_kwargs": {"nudge": True}}  # S6: the model-turn corrector
+SUBMIT_NUDGE_ARM = {"label": "submit_nudge", "run_kwargs": {"submit_nudge": True}}  # S8: prod a stalled run to submit
 
 
 def run_arms(
@@ -93,6 +94,7 @@ def run_arms(
             "label": r["label"], "correct": r["correct"], "n": r["n"], "rate": r["rate"],
             "wilson": [lo, hi], "by_stop": r["by_stop"],
             "recoveries": r.get("recoveries", 0), "nudges": r.get("nudges", 0),
+            "submit_nudges": r.get("submit_nudges", 0),
         }
         if i > 0:  # every non-baseline arm gets a Newcombe interval vs the shared baseline
             d, d_lo, d_hi = newcombe_diff(base["correct"], base["n"], r["correct"], r["n"])
@@ -200,6 +202,8 @@ def _report_arms(s: dict) -> None:
             extra += f"   (harness recoveries: {a['recoveries']})"
         if a["nudges"]:
             extra += f"   (corrective nudges: {a['nudges']})"
+        if a.get("submit_nudges"):
+            extra += f"   (submit nudges: {a['submit_nudges']})"
         print(f"  {a['label']:<16} {a['correct']:>3}/{a['n']:<3} = {_pct(a['rate']):>6}   "
               f"95% CI [{_pct(a['wilson'][0])}, {_pct(a['wilson'][1])}]{extra}")
     print("-" * 72)

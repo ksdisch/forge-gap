@@ -15,10 +15,11 @@ forge-gap/
 ├─ stats.py            # S4 Wilson + Newcombe confidence intervals
 ├─ ablation.py         # ablation harness: run_arms (N arms, S6) + run_ablation (2-arm legacy, S4), with CIs
 ├─ malformed_ablation.py # S6 three-arm malformed-call ablation: baseline / +error-recovery / +retry-nudge
-├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap figures from saved numbers
+├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap + S8 weak-gap figures from saved numbers
+├─ weak_ablation.py    # the S8 clean 3-arm ablation on a weak model (baseline / +retry-nudge / +submit-nudge)
 ├─ verify.py           # smoke test: plain chat + one tool-calling round-trip
-├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge)
-├─ docs/figures/       # the committed gap-closure + malformed-gap charts (PNG) + their vendored data (JSON)
+├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge, submit_nudge)
+├─ docs/figures/       # the committed gap-closure + malformed-gap + weak-gap charts (PNG) + their vendored data (JSON)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv + matplotlib)
@@ -160,6 +161,34 @@ uv run malformed_ablation.py z-ai/glm-4.6 20 0.6     # args: model, N distinct s
 
 Offline, the mechanism + fault are covered without API calls by `uv run test_malformed.py` and
 `uv run test_nudge.py`. The full reasoning is in `docs/DECISIONS.md` **D19**.
+
+## 9. The natural gap (S8 — a weak model, and a guardrail that finally fires on its own)
+
+S3–S7 studied GLM-4.6, which is robust enough that its gaps had to be *injected*. S8 flips the variable:
+hold the task fixed and **clean** (no injection) and swap in a **weaker** model. Two fit pilots found a
+**capability cliff** — neither weak model fails the way we pre-registered. `llama-3.1-8b` hallucinates the
+final number even with the data in hand (a *validation* gap); **`mistral-nemo`** computes the right answer
+(`158`) and then **never calls the terminal tool** — it narrates "calling submit_answer…" and stops (a
+*no-submit* / *protocol* gap). So S8 built a NEW, matched guardrail — **submit-nudge**: when a run ends in
+prose with nothing submitted, re-prompt the model to actually call the tool, then continue.
+
+![Weak-model natural gap — baseline 0%, +retry-nudge 0% (null), +submit-nudge 75% on mistral-nemo](docs/figures/weak-gap.png)
+
+**This is the project's first *natural* (un-injected) gap-closure — and it shows guardrail specificity in one
+picture.** On the clean task (mistral-nemo, N=20, temp 0.7): **baseline 0/20**, **+retry-nudge 0/20** (a
+null — it fires **0** times, because a no-submit isn't a *failed* call), and **+submit-nudge 15/20 = 75%**, a
+**+75.0 pp** gap, Newcombe 95% CI **[+47.8%, +88.8%]** — clears 0, with non-overlapping Wilson bars. The
+*wrong* guardrail does nothing; the *matched* one lifts. The residual (5/20 submit `140`, shipping forgotten)
+is a *validation* gap submit-nudge can't fix — parked as a separate experiment. The claim is the **capability ×
+guardrail interaction**: a weak-but-tool-capable model needs a guardrail GLM-4.6 didn't.
+
+```bash
+# needs your key in .env — real model calls (~N×3 trials); regenerate the figure with `uv run chart.py`
+uv run weak_ablation.py mistralai/mistral-nemo 20     # args: model, N runs (clean task, no injection)
+```
+
+Offline, the guardrail is covered without API calls by `uv run test_submit_nudge.py` and the vendored figure
+data by `uv run test_chart.py`. The full reasoning is in `docs/DECISIONS.md` **D21**.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart

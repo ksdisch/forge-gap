@@ -20,12 +20,14 @@ faults rather than found naturally, say so plainly in the README and writeup.
 
 ## File map
 - `glm.py` — the minimal GLM-via-OpenRouter client (`chat()`, `MODEL`). The foundation
-  everything builds on. Forwards `tools` / `tool_choice` / `temperature` straight through.
+  everything builds on. Forwards `tools` / `tool_choice` / `temperature` straight through; `max_retries=8`
+  rides out provider 429/5xx blips (HTTP hygiene, not a measured mechanism).
 - `agent.py` — the scenario-agnostic reason→act→observe loop + deterministic grading. ZERO
-  mechanisms *by default* (the bare baseline); two opt-in arm toggles that stay off unless an arm turns
-  them on — `recover` (S4 error-recovery: a no-turn harness retry of *transient* faults) and `nudge`
-  (S6 retry-nudge: an explicit corrective re-prompt that costs a *model* turn, for *malformed* calls).
-  Pure `dispatch()` + `dispatch_with_recovery()` + `_nudge_message()`; per-step JSONL trajectory + a `grade` event.
+  mechanisms *by default* (the bare baseline); three opt-in arm toggles that stay off unless an arm turns
+  them on — `recover` (S4 error-recovery: a no-turn harness retry of *transient* faults), `nudge`
+  (S6 retry-nudge: a corrective re-prompt that costs a *model* turn, for *malformed* calls), and `submit_nudge`
+  (S8: re-prompt a run that ended in prose *without submitting* to call the terminal tool — for a *no-submit* gap).
+  Pure `dispatch()` + `dispatch_with_recovery()` + `_nudge_message()` + `_submit_nudge_message()`; per-step JSONL trajectory + a `grade` event.
 - `scenario.py` — the S2 lookup-then-compute task as data: a frozen `Scenario` (two chained
   lookup tools + a `submit_answer` terminal tool + known ground truth).
 - `oracle.py` — the deterministic grader (`grade()`): computed value vs known ground truth,
@@ -43,23 +45,28 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `ablation.py` — the ablation harness. `run_arms` (S6): runs *N* arms over identical seeded faults, each
   with a Wilson CI + a Newcombe gap vs the baseline. `run_ablation` (S4) delegates to it but repackages
   into the original 2-arm shape, so the S4/S5 figure stays byte-compatible. Arms are config
-  (`{label, run_kwargs}`): `BASELINE_ARM`, `RECOVERY_ARM`, `NUDGE_ARM`.
+  (`{label, run_kwargs}`): `BASELINE_ARM`, `RECOVERY_ARM`, `NUDGE_ARM`, `SUBMIT_NUDGE_ARM`.
 - `malformed_ablation.py` — the S6 3-arm experiment: baseline / +error-recovery / +retry-nudge over the
   malformed-call testbed. Measured a NULL on GLM-4.6 (the model self-corrects). `uv run malformed_ablation.py`.
-- `chart.py` — the deliverable renderer: `build_figure` (S5 2-bar gap-closure) + `build_multi_figure` (S6
-  N-bar; bar colour follows the *measured* verdict). Reads vendored `docs/figures/*-data.json`;
-  `uv run chart.py` regenerates both PNGs. No API, no model call.
+- `weak_ablation.py` — the S8 3-arm experiment: baseline / +retry-nudge / +submit-nudge over the CLEAN task
+  (no injection) on a *weak* model. Measured **+75 pp** for submit-nudge on mistral-nemo (retry-nudge a null in
+  the same run). `uv run weak_ablation.py mistralai/mistral-nemo 20`.
+- `chart.py` — the deliverable renderer: `build_figure` (S5 2-bar gap-closure) + `build_multi_figure` (N-bar;
+  bar colour follows the *measured* verdict; serves both the S6 injected-malformed and the S8 natural-gap
+  figures via `caption_fn`/`subtitle`, so the honesty caption matches the testbed). Reads vendored
+  `docs/figures/*-data.json`; `uv run chart.py` regenerates all PNGs. No API, no model call.
 - `check_docs.py` — freshness check for the learning spine: flags any done stage missing from
   `docs/LEARNING.md`. Run `uv run check_docs.py`. A smoke alarm, not a commit gate.
 - `test_*.py` — offline, network-free suites (oracle, faults, runner, stats, recover, ablation, chart,
-  malformed, nudge), each runnable with `uv run test_<name>.py`.
+  malformed, nudge, submit_nudge), each runnable with `uv run test_<name>.py`.
 - `.env.example` — config template (committed). `.env` holds the real key (gitignored).
 - `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
   why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
   `/wrap` recaps). Start here to catch up; see `docs/README.md`.
-- *(next)* the **natural-gap stretch** (DECISIONS D12): drop injected faults and harden the task until GLM
-  fails on its *own* mechanical merits, then re-run the guardrails. (S5 shipped the gap-closure chart; S6
-  added retry-nudge + a malformed-call fault and measured a *null* — GLM self-corrects malformed calls.)
+- *(next)* a **validation guardrail** (DECISIONS D21 "Parked"): catch the *wrong-answer-no-error* residual —
+  the model submits a number that doesn't match the retrieved fields. S7 closed the natural-gap stretch on
+  GLM-4.6 (no gap); S8 found a natural gap on a *weak* model (mistral-nemo) and closed its *no-submit* layer
+  with submit-nudge (+75 pp) — the *validation* layer is what's left.
 
 ## Methodology guardrails (load-bearing — do not drift)
 - **Deterministic oracle, never an LLM judge.** Task success is measured against known

@@ -27,6 +27,10 @@ OUT_PATH = os.path.join("docs", "figures", "gap-closure.png")
 MULTI_DATA_PATH = os.path.join("docs", "figures", "malformed-gap-data.json")
 MULTI_OUT_PATH = os.path.join("docs", "figures", "malformed-gap.png")
 
+# S8: the N-bar NATURAL-gap figure on a weak model (baseline / +retry-nudge / +submit-nudge, CLEAN task).
+WEAK_DATA_PATH = os.path.join("docs", "figures", "weak-gap-data.json")
+WEAK_OUT_PATH = os.path.join("docs", "figures", "weak-gap.png")
+
 # Palette: muted gray for the no-help baseline, positive teal for a mechanism that really lifts,
 # neutral steel for a mechanism whose gap straddles 0 (a null — colour follows the measured verdict,
 # never the hoped-for one, so the figure can't over-claim).
@@ -39,6 +43,7 @@ ARM_DISPLAY = {
     "baseline": "Baseline\n(no mechanism)",
     "error_recovery": "+ Error-recovery\n(harness retry)",
     "retry_nudge": "+ Retry-nudge\n(model re-prompt)",
+    "submit_nudge": "+ Submit-nudge\n(prompt to submit)",
 }
 
 
@@ -131,6 +136,28 @@ def multi_caption(s: dict) -> str:
     )
 
 
+# --- S8: pure helpers for the N-bar NATURAL-gap (weak model) figure ----------
+
+def submit_nudges_spent(s: dict) -> int:
+    """Total submit-nudges the submit-nudge arm issued (0 if there is no such arm)."""
+    for a in s["arms"]:
+        if a["label"] == "submit_nudge":
+            return a.get("submit_nudges", 0)
+    return 0
+
+
+def weak_caption(s: dict) -> str:
+    """Honesty caption for the S8 weak-model figure: the gap is NATURAL — no fault injection at all.
+    It states the clean task + model + that the lift came from submit-nudges, and that the residual
+    misses are wrong-answer (a *validation* gap submit-nudge can't close) — never claims 'INJECTED'."""
+    return (
+        f"N={s['n']} runs  ·  CLEAN task, NO fault injection  ·  "
+        f"temp {s['temperature']}  ·  {s['model']}\n"
+        f"gap is NATURAL (the weak model's own no-submit failure)  ·  "
+        f"submit-nudge spent {submit_nudges_spent(s)} re-prompts  ·  residual misses are wrong-answer (validation)"
+    )
+
+
 # --- the figure (matplotlib; smoke-verified by running chart.py) --------------
 
 def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
@@ -198,14 +225,18 @@ def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
     return out_path
 
 
-def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH) -> str:
-    """Draw the S6 N-bar malformed-call ablation from an `arms`-shaped summary `s`; write `out_path`.
+def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
+                       caption_fn=multi_caption, subtitle: str | None = None) -> str:
+    """Draw an N-bar ablation from an `arms`-shaped summary `s`; write `out_path`.
 
-    One completion-rate axis, one bar per arm (baseline / +error-recovery / +retry-nudge), each with
-    its Wilson whisker + k/N label. Bars are coloured by the measured verdict (teal = a real lift,
-    steel = a null), each mechanism carries its Newcombe gap vs the shared baseline, and the honesty
-    caption states the gap is injected. Holding the fault fixed and varying only the mechanism is what
-    makes the 'each guardrail fixes its own failure' story legible (DECISIONS D19)."""
+    One completion-rate axis, one bar per arm, each with its Wilson whisker + k/N label. Bars are
+    coloured by the measured verdict (teal = a real lift, steel = a null), each mechanism carries its
+    Newcombe gap vs the shared baseline. Holding the fault fixed and varying only the mechanism is what
+    makes the 'each guardrail fixes its own failure' story legible (DECISIONS D19).
+
+    `caption_fn` and `subtitle` let one renderer serve both the S6 *injected* malformed figure (the
+    defaults) and the S8 *natural*-gap figure (pass `weak_caption` + a clean-task subtitle), so the
+    honesty caption always matches the actual testbed instead of hardcoding 'INJECTED'."""
     import matplotlib
     matplotlib.use("Agg")  # headless backend: render straight to a file, no display
     import matplotlib.pyplot as plt
@@ -255,12 +286,16 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH) -> str:
 
     # Title follows the measured verdict — a win only if some mechanism's gap actually clears 0.
     any_win = any(is_win(a) for a in arms[1:])
-    suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
-                else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
+    if s["fault_kind"] == "none":  # S8: a natural gap (no injection) reads differently than a fault gap
+        suptitle = ("A matched guardrail closes a weak model's natural gap" if any_win
+                    else "No guardrail beats the baseline on the clean task")
+    else:
+        suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
+                    else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
     fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.98)
-    ax.set_title("GLM-4.6 · multi-step tool task · injected MALFORMED-call testbed",
+    ax.set_title(subtitle or "GLM-4.6 · multi-step tool task · injected MALFORMED-call testbed",
                  fontsize=10, color="#666666", pad=10)
-    fig.text(0.5, 0.015, multi_caption(s), ha="center", va="bottom",
+    fig.text(0.5, 0.015, caption_fn(s), ha="center", va="bottom",
              fontsize=8.5, color="#777777", style="italic")
 
     fig.tight_layout(rect=(0, 0.07, 1, 0.95))
@@ -285,6 +320,21 @@ def main() -> int:
         mout = build_multi_figure(ms)
         print(f"wrote {mout}")
         for a in ms["arms"]:
+            tail = ""
+            if "gap_vs_baseline" in a:
+                gg = a["gap_vs_baseline"]
+                v = "REAL" if gg["excludes_zero"] else "null"
+                tail = f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}"
+            print(f"  {a['label']:<16} {pct(a['rate'])} ({a['correct']}/{a['n']}){tail}")
+
+    # S8: render the weak-model NATURAL-gap figure too, if its vendored data is present.
+    if os.path.exists(WEAK_DATA_PATH):
+        ws = load_summary(WEAK_DATA_PATH)
+        wout = build_multi_figure(
+            ws, out_path=WEAK_OUT_PATH, caption_fn=weak_caption,
+            subtitle="mistral-nemo · multi-step tool task · CLEAN (no injection) · natural no-submit gap")
+        print(f"wrote {wout}")
+        for a in ws["arms"]:
             tail = ""
             if "gap_vs_baseline" in a:
                 gg = a["gap_vs_baseline"]
