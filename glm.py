@@ -44,6 +44,11 @@ def client() -> OpenAI:
         base_url=OPENROUTER_BASE_URL,
         api_key=key,
         default_headers=_DEFAULT_HEADERS,
+        # Provider rate-limits (429) and transient 5xx are common on cheap/shared OpenRouter routes;
+        # let the SDK ride them out with exponential backoff so a blip doesn't abort a whole N-trial
+        # arm (runner.run_arm has no per-trial guard). This is API/infra hygiene (like MAX_TOKENS) at
+        # the HTTP layer — NOT the experiment's error-recovery arm, which retries *tool* faults.
+        max_retries=8,
     )
 
 

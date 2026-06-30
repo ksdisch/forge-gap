@@ -1,0 +1,77 @@
+{
+  "model": "mistralai/mistral-nemo",
+  "n": 20,
+  "fault_rate": 0.0,
+  "temperature": 0.7,
+  "fault_kind": "none",
+  "baseline_label": "baseline",
+  "arms": [
+    {
+      "label": "baseline",
+      "correct": 0,
+      "n": 20,
+      "rate": 0.0,
+      "wilson": [
+        0.0,
+        0.16113012549493322
+      ],
+      "by_stop": {
+        "no_submit": 17,
+        "submitted": 3
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 0
+    },
+    {
+      "label": "retry_nudge",
+      "correct": 0,
+      "n": 20,
+      "rate": 0.0,
+      "wilson": [
+        0.0,
+        0.16113012549493322
+      ],
+      "by_stop": {
+        "no_submit": 15,
+        "submitted": 5
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 0,
+      "gap_vs_baseline": {
+        "delta": 0.0,
+        "newcombe": [
+          -0.16113012549493322,
+          0.16113012549493322
+        ],
+        "excludes_zero": false
+      }
+    },
+    {
+      "label": "submit_nudge",
+      "correct": 15,
+      "n": 20,
+      "rate": 0.75,
+      "wilson": [
+        0.5312949900419365,
+        0.888139947210597
+      ],
+      "by_stop": {
+        "submitted": 20
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 15,
+      "gap_vs_baseline": {
+        "delta": 0.75,
+        "newcombe": [
+          0.4783480191075913,
+          0.888139947210597
+        ],
+        "excludes_zero": true
+      }
+    }
+  ],
+  "summary_path": "runs/weak-ablation-summary.json"
+}

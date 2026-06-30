@@ -133,6 +133,19 @@ def _nudge_message(failures: list[tuple[str, str]]) -> str:
     )
 
 
+# --- submit-nudge: the S8 mechanism (re-prompt a model that never submitted) ------
+def _submit_nudge_message() -> str:
+    """Build submit-nudge's re-prompt: the loop reached a turn with NO tool call and nothing submitted
+    yet — the model narrated an answer instead of calling the terminal tool (mistral-nemo's failure).
+    Tell it to actually emit the `submit_answer` call. Unlike retry-nudge (which fires on a *failed*
+    call), this fires on a *missing terminal* call; it spends one model turn to convert a
+    known-but-unsubmitted answer into a real submission (DECISIONS D21)."""
+    return (
+        "You have not called submit_answer yet, so the task is not finished. "
+        "Do not just describe the answer — call the submit_answer tool now with your final numeric value."
+    )
+
+
 # --- the loop -------------------------------------------------------------
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -147,6 +160,7 @@ def run(
     recover: bool = False,
     max_recoveries: int = MAX_RECOVERIES,
     nudge: bool = False,
+    submit_nudge: bool = False,
     out_path: str = TRAJECTORY_PATH,
 ) -> dict:
     """Run one reason->act->observe loop to completion, then grade it.
@@ -167,7 +181,14 @@ def run(
     ("that call failed: …; correct the arguments and call again"). Unlike error-recovery (a harness
     retry, NO model turn), retry-nudge spends a model turn, so it can fix a MALFORMED call a blind
     retry cannot (DECISIONS D19). `nudge=False` is the bare baseline (the raw error is fed back as the
-    tool result and the loop moves on). The two toggles are independent arms; either, both, or neither.
+    tool result and the loop moves on).
+
+    `submit_nudge` toggles the S8 **submit-nudge** mechanism: when True, a turn that ends in prose with NO
+    tool call AND nothing submitted yet triggers one explicit re-prompt ("you haven't called submit_answer;
+    do it now") and the loop continues, instead of ending as `no_submit`. Unlike retry-nudge (which fires on
+    a *failed* call), submit-nudge fires on a *missing terminal* call — the natural failure of a model that
+    computes the answer but never emits the terminal tool (DECISIONS D21). `submit_nudge=False` is the bare
+    baseline (a no-call turn ends the run). These mechanism toggles are independent arms; any combination, or none.
 
     Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and how
     many harness-level recoveries and corrective nudges fired); writes the full trajectory to `out_path`.
@@ -186,6 +207,7 @@ def run(
         "event": "run", "ts": _now(), "model": resolved_model, "scenario": scenario.name,
         "temperature": temperature, "max_steps": max_steps, "max_tokens": MAX_TOKENS,
         "recover": recover, "max_recoveries": max_recoveries, "nudge": nudge,
+        "submit_nudge": submit_nudge,
         "task": scenario.task,
         "ground_truth": scenario.ground_truth,
     })
@@ -196,6 +218,7 @@ def run(
     prompt_tokens = completion_tokens = 0
     total_recoveries = 0      # harness-level retries the error-recovery arm absorbed this run
     total_nudges = 0          # corrective re-prompts the retry-nudge arm issued this run
+    total_submit_nudges = 0   # submit-nudge re-prompts issued this run (the S8 arm)
 
     for step in range(max_steps):
         resp = chat(messages, model=resolved_model, tools=scenario.tools,
@@ -224,7 +247,17 @@ def run(
         })
 
         if not calls:
-            # No tool call -> GLM stopped without submitting. Its prose is the (ungraded) answer.
+            # No tool call this turn. With submit-nudge ON, a run that stalled in prose WITHOUT
+            # submitting (narrated an answer but never called the terminal tool) gets one explicit
+            # re-prompt to actually submit, then continues — instead of ending as no_submit. The bare
+            # baseline (submit_nudge=False) just ends here. (S8 / DECISIONS D21.)
+            if submit_nudge and submitted is None and step < max_steps - 1:
+                messages.append({"role": "assistant", "content": msg.content})
+                messages.append({"role": "user", "content": _submit_nudge_message()})
+                total_submit_nudges += 1
+                log({"event": "submit_nudge", "step": step, "count": total_submit_nudges})
+                continue
+            # Otherwise the run stops: GLM ended in prose without submitting (the ungraded answer).
             stop, final_answer = "no_submit", msg.content
             break
 
@@ -301,7 +334,8 @@ def run(
     # GRADE — the deterministic oracle has the final word (never an LLM).
     correct, detail = grade(submitted, scenario.ground_truth)
     log({"event": "final", "step": step, "stop": stop, "answer": final_answer,
-         "recoveries": total_recoveries, "nudges": total_nudges})
+         "recoveries": total_recoveries, "nudges": total_nudges,
+         "submit_nudges": total_submit_nudges})
     log({
         "event": "grade", "submitted": submitted, "expected": scenario.ground_truth,
         "correct": correct, "reason": detail["reason"], "stop": stop,
@@ -324,6 +358,8 @@ def run(
         "recoveries": total_recoveries,
         "nudge": nudge,
         "nudges": total_nudges,
+        "submit_nudge": submit_nudge,
+        "submit_nudges": total_submit_nudges,
         "tokens": {"prompt": prompt_tokens, "completion": completion_tokens},
         "trajectory": out_path,
         "records": len(records),

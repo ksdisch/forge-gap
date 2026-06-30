@@ -509,6 +509,77 @@ It's the honest cap on the headline goal: across four probes GLM-4.6 doesn't pro
 
 ---
 
+## S8 — A weak model's natural gap, and a guardrail that closes it (+75 pp)
+
+**What we built.** S7 proved GLM-4.6 never breaks on its own — but was the *task* unbreakable, or is GLM just
+strong? S8 settles it by changing the one variable we hadn't: the **model**. Hold the task fixed and **clean**
+(no injected faults) and swap GLM-4.6 for a *weaker* model. Three pieces:
+
+- A quick **scout** of OpenRouter (254 of 338 models expose tool-calling; the tiny 1–3B ones don't, so the
+  "too weak to even tool-call" floor partly takes care of itself), then **fit pilots** on two weak models.
+- `weak_ablation.py` — a clean 3-arm ablation (baseline / +retry-nudge / +submit-nudge) over the frozen S2 task
+  with **no fault injection at all** (`fault_kind="none"`).
+- **submit-nudge** — a NEW guardrail in `agent.py` (the `submit_nudge` toggle), test-driven via
+  `test_submit_nudge.py`: when a turn ends in prose with **nothing submitted**, re-prompt the model to actually
+  call `submit_answer`, then continue — instead of ending the run.
+
+**What the pilots found — a capability cliff.** Neither weak model failed the way we pre-registered (a
+*malformed call*). Instead each failed a *different* non-tool-error way, both scoring 0/16:
+
+- **`llama-3.1-8b`** retrieves the data but **hallucinates the final number** — it had `140` and `18` in hand and
+  still submitted `1234.56`, even submitting a literal formula string. A *validation* failure (parked).
+- **`mistral-nemo`** computes the right answer (`158`) and then **never calls the terminal tool** — it narrates
+  "calling submit_answer…" and stops. A *protocol* / **no-submit** failure — the one submit-nudge targets.
+
+**The result — the first *natural* gap-closure.** Clean 3-arm ablation, mistral-nemo, **N=20**:
+**baseline 0% · +retry-nudge 0% (a null — it fires 0 times, because a no-submit isn't a *failed* call) ·
++submit-nudge 75%**. Gap **+75.0 pp, Newcombe 95% CI [+47.8, +88.8]** — clears 0, and the Wilson bars don't
+overlap. Figure: `docs/figures/weak-gap.png`.
+
+**Teaching note.** Two ideas. **(1) Guardrail specificity, now in one picture.** The same experiment runs the
+*wrong* guardrail (retry-nudge) and the *right* one (submit-nudge) side by side: the wrong one does literally
+nothing — it never even fires — and the matched one lifts completion from 0% to 75%. A guardrail isn't "more
+reliability" in general; it closes *one named failure* and is blind to the others. **(2) The result that matters
+is the *interaction*, not the model.** This is **not** "mistral-nemo is bad." It's that a *weak-but-tool-capable*
+model has a natural failure (it forgets to pull the terminal trigger) that a strong model (GLM-4.6, S6/S7) simply
+doesn't — so the guardrail that's worthless on GLM is worth +75 pp here. The honest residual proves the point:
+submit-nudge made the model *submit* every time, but 5/20 of those were a wrong `140` (shipping forgotten) — a
+*validation* gap it can't touch, which is the next experiment.
+
+**New words.** *submit-nudge*, *protocol gap / no-submit*, *capability cliff*, *bifurcation*, *fit pilot*,
+*capability × guardrail interaction*.
+
+**Recall — try before you reveal:**
+
+Q1. On mistral-nemo, the +retry-nudge arm measured an exact 0.0 pp gap and fired **zero** nudges, while
++submit-nudge lifted completion to 75%. Both are "nudge the model" guardrails — why did one do nothing and the
+other work?
+
+<details><summary>answer</summary>
+
+They target different failures. Retry-nudge only fires after a *failed tool call* (it re-prompts "that call errored — fix it"). mistral-nemo's failure isn't a failed call; it's a *missing* one — it computes 158 and never calls submit_answer at all, ending the turn in prose. With no failed call, retry-nudge never triggers (0 nudges, 0 effect). Submit-nudge fires on exactly that condition — "you ended without submitting" — and re-prompts the model to call the terminal tool, which it then does. Same idea (re-prompt the model), different trigger; only the trigger that matches the failure helps. That's guardrail specificity.
+
+</details>
+
+Q2. S8's headline is +75 pp on mistral-nemo, but S6/S7 showed guardrails do little for GLM-4.6. Isn't that a
+contradiction? What is S8 actually claiming?
+
+<details><summary>answer</summary>
+
+No contradiction — S8's claim is about the *interaction* between model capability and a guardrail, not about guardrails in general. A strong model (GLM-4.6) reliably calls the terminal tool, so a submit-nudge has nothing to do → no gap to close (consistent with S6/S7). A weaker-but-tool-capable model (mistral-nemo) reliably computes the answer but often forgets to submit it → a real natural gap a submit-nudge closes (+75 pp). The finding is "which capability level needs which guardrail," not "mistral-nemo is bad" or "guardrails always help."
+
+</details>
+
+Q3. submit-nudge took mistral-nemo from 0% to 75% — but why not to ~100%, and what does the leftover tell us?
+
+<details><summary>answer</summary>
+
+Because there are *two* natural failures stacked here. Submit-nudge fixes the *protocol* gap — the model not calling the terminal tool — and it fixed it completely (every run submitted). But ~5/20 of those submissions were `140` (item total with shipping forgotten): a *validation* gap — a wrong answer with no error. Submit-nudge makes the model submit; it can't make the arithmetic right. The residual ~25% is exactly the wrong-answer failure that a *validation* guardrail (the parked next experiment) would target — the same failure type S7's analysis flagged.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -573,3 +644,9 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **bounded escalation** — a pre-committed rule allowing task difficulty to be raised only a fixed number of times, with a hard stop (S7: escalate once; if GLM still scores ≥7/8, declare done) — so a gap hunt can't become an open-ended chase.
 - **at ceiling** — scoring at (or statistically indistinguishable from) 100%, leaving no room to measure an improvement; GLM-4.6 is at ceiling on both the clean and the hardened tasks.
 - **robustness signal** — an independent observation that a model handles a task class without help; S7 collected four (20/20 clean, self-heals malformed, 8/8 hard-v1, 8/8 hard-v2).
+- **submit-nudge** — the S8 guardrail: when a run ends in prose with nothing submitted, re-prompt the *model* to actually call the terminal tool, then continue (the `submit_nudge` toggle in `agent.py`). The natural-failure counterpart to retry-nudge — it fires on a *missing* terminal call, not a *failed* one.
+- **protocol gap / no-submit** — a failure where the model has the right answer but doesn't follow the interaction *protocol*: here, never emitting the `submit_answer` tool call (it narrates the answer as prose and stops). mistral-nemo's natural failure; what submit-nudge closes.
+- **capability cliff** — a task where models cluster at the extremes — strong ones *ace* it (no gap), weak ones *fail wholesale* (≈0%) — with a narrow or empty "fails a little, mechanically" band between. Both S8 weak models landed at 0%, by different failure modes.
+- **bifurcation** — when a probe splits into two qualitatively different outcomes rather than a tidy middle (here, two weak models failing 0% in two *different* ways: hallucinated answer vs no-submit); the signal that triggered S8's pivot.
+- **fit pilot** — a tiny baseline-only run used to check whether a candidate model lands in the measurable "sweet spot" (not ~100%, not ~0%) *before* committing to a full ablation — model-selection's version of the S6/S7 pilot.
+- **capability × guardrail interaction** — the S8 thesis: how much a guardrail helps depends on the *model's* capability — a submit-nudge is worthless on GLM-4.6 (it always submits) but worth +75 pp on mistral-nemo (which forgets to). The claim is the interaction, not "model X is bad."

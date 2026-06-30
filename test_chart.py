@@ -19,6 +19,7 @@ import sys
 
 from chart import (
     MULTI_DATA_PATH,
+    WEAK_DATA_PATH,
     bar_label,
     caption,
     fmt_pp_ci,
@@ -30,6 +31,8 @@ from chart import (
     nudges_spent,
     pct,
     signed_pp,
+    submit_nudges_spent,
+    weak_caption,
     wilson_yerr,
 )
 
@@ -178,6 +181,37 @@ def test_vendored_malformed_matches() -> None:
     check("retry_nudge delta == 0.0", close(s["arms"][2]["gap_vs_baseline"]["delta"], 0.0))
 
 
+# --- S8: the N-bar NATURAL-gap (weak model) figure's pure helpers + vendored data ---
+def test_submit_nudges_spent_and_weak_caption() -> None:
+    print("submit_nudges_spent / weak_caption — honesty disclosure for the NATURAL-gap figure")
+    s = load_summary(WEAK_DATA_PATH)
+    check("submit_nudges_spent reads the submit-nudge arm (15)", submit_nudges_spent(s) == 15)
+    cap = weak_caption(s)
+    for piece in ("N=20", "CLEAN task", "temp 0.7", "mistralai/mistral-nemo", "NATURAL"):
+        check(f"weak caption mentions '{piece}'", piece in cap)
+    check("weak caption never claims the gap is INJECTED (it's natural)", "INJECTED" not in cap)
+
+
+def test_vendored_weak_matches() -> None:
+    print("vendored weak data — the exact S8 natural-gap result (the figure's source of truth)")
+    s = load_summary(WEAK_DATA_PATH)
+    check("model == mistralai/mistral-nemo", s["model"] == "mistralai/mistral-nemo")
+    check("N == 20", s["n"] == 20)
+    check("fault_kind == none (clean, no injection)", s["fault_kind"] == "none")
+    check("fault_rate == 0.0", s["fault_rate"] == 0.0)
+    check("three arms, in order",
+          [a["label"] for a in s["arms"]] == ["baseline", "retry_nudge", "submit_nudge"])
+    check("baseline 0/20 = 0%", s["arms"][0]["correct"] == 0 and s["arms"][0]["rate"] == 0.0)
+    check("retry_nudge gap straddles 0 (null — the wrong guardrail)",
+          s["arms"][1]["gap_vs_baseline"]["excludes_zero"] is False)
+    check("submit_nudge 15/20 = 75%",
+          s["arms"][2]["correct"] == 15 and close(s["arms"][2]["rate"], 0.75))
+    check("submit_nudge fired 15 submit-nudges", s["arms"][2]["submit_nudges"] == 15)
+    check("submit_nudge gap clears 0 -> a real result",
+          s["arms"][2]["gap_vs_baseline"]["excludes_zero"] is True)
+    check("submit_nudge delta == 0.75", close(s["arms"][2]["gap_vs_baseline"]["delta"], 0.75))
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -191,6 +225,8 @@ def main() -> int:
         test_gap_tag,
         test_nudges_and_multi_caption,
         test_vendored_malformed_matches,
+        test_submit_nudges_spent_and_weak_caption,
+        test_vendored_weak_matches,
     ):
         t()
         print()
