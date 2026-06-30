@@ -17,17 +17,17 @@ flowchart TB
     S4["S4 · Error-recovery arm + CIs<br/>67.5% → 100% = +32.5% ✓ (a real win)"]:::done
     S5["S5 · Gap-closure chart<br/>the deliverable figure"]:::done
     S6["S6 · Retry-nudge + malformed fault<br/>measured NULL — GLM self-corrects"]:::done
-    G["NEXT — the goal<br/>Natural-gap stretch · D12<br/>harden the task, find GLM's own failures"]:::goal
-    F["S7–S12 · planned<br/>further guardrails / fault types"]:::planned
+    S7["S7 · Natural-gap hunt · D12<br/>hardened task — GLM aces 8/8, no natural gap"]:::done
+    F["S8–S12 · planned<br/>further guardrails / fault types / models"]:::planned
 
-    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> G --> F
+    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> F
 
     classDef done fill:#2a9d8f,stroke:#1d6f66,color:#ffffff;
     classDef goal fill:#e9c46a,stroke:#b8902f,color:#222222,stroke-width:2px;
     classDef planned fill:#eeeeee,stroke:#9e9e9e,color:#555555;
 ```
 
-**Legend:** 🟩 shipped (S0–S6) · 🟨 next — the goal · ⬜ planned (S7–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls, so no guardrail beats baseline). The detailed table below is the source of truth; this map is its at-a-glance view.
+**Legend:** 🟩 shipped (S0–S7) · ⬜ planned (S8–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls), **S7 = no natural gap** (a strong model doesn't break on its own — injected faults are required). The detailed table below is the source of truth; this map is its at-a-glance view.
 
 | Stage | What it does (plain English) | Why it exists | Status |
 |-------|------------------------------|---------------|--------|
@@ -38,7 +38,8 @@ flowchart TB
 | **S4** | The **first mechanism arm + the ablation runner**: add a toggleable **error-recovery** guardrail (the harness silently retries a transient tool fault, spending *no* model turn), then run **two arms** — baseline vs +error-recovery — over the *same* injected faults and compute proper confidence intervals (Wilson per arm + Newcombe on the gap between them). | Turns one-off runs into a *measurement of a difference*: the gap-closure number, with honest error bars instead of a bare k/N. | ✅ done — **measured**: 67.5% → 100%, **+32.5%** (Newcombe 95% CI [+17.3%, +48.0%]) at rate 0.6, N=40 |
 | **S5** | Draw the **gap-closure chart** — turn S4's two measured arms into the project's headline figure (`chart.py` → `docs/figures/gap-closure.png`): two bars with **Wilson** whiskers, the **Newcombe** gap annotation, and an honesty caption. Reads the *saved* S4 numbers — no re-run. | The actual deliverable, made legible: one honest figure of how much error-recovery closes the injected gap. | ✅ done |
 | **S6** | Add the **second guardrail (retry-nudge)** + the **malformed-call** fault it targets, and run a 3-arm ablation (baseline / +error-recovery / +retry-nudge) on that testbed. **Result: a measured NULL** — GLM self-corrects malformed calls unaided, so no guardrail beats the baseline. | Tests *where a guardrail helps* — and finds the boundary: only where the model can't self-correct. | ✅ done |
-| **S7–S12** | Layer any **further guardrails** / fault types, or pursue the **natural-gap stretch** (D12). | How much *each* guardrail closes the gap. | ⬜ planned |
+| **S7** | The **natural-gap hunt** (D12): drop injected faults and *harden the task itself* (a 4–5 lookup chain through ~25 confusable records, named by description so the model must disambiguate) until GLM fails on its own. Pilot-gated, with a bounded escalation. **Result: GLM aced it 8/8 (v1) and 8/8 (v2) — no natural gap.** | Tests the headline goal: does a strong model break on its own merits? It doesn't — so injected faults are the honest way to study guardrails here. | ✅ done — **no natural gap** (4th robustness signal) |
+| **S8–S12** | Layer any **further guardrails** / fault types / models. | How much *each* guardrail closes the gap. | ⬜ planned |
 
 *(forge-gap runs **S0 → ~S12**; the gap-closure chart now exists at **S5**, and **S6–S12** layer the remaining mechanisms one at a time and extend it — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
 
@@ -104,6 +105,23 @@ the harness to **N arms** (`run_arms`) and the chart to **N bars**, keeping the 
 byte-compatible. Choices + the measured null are DECISIONS **D19**. All **nine** offline suites green.
 **Next (S7+):** the **natural-gap stretch** (D12) — drop injection, harden the task until GLM fails on its
 own merits — remains the headline goal, now standing on a richer, two-fault testbed.
+
+**S7 done — the natural-gap hunt: GLM-4.6 doesn't break on its own (a measured no).** The headline stretch
+(D12): drop injected faults and *harden the task itself* until GLM fails on its own mechanical merits, then
+re-run the guardrails. We built a hardened scenario (`scenario_hard.py`) — a 4-lookup chain (`find_orders` →
+`get_order` → `get_ship_rate` → `get_customer_discount`) through 15 look-alike records, named by description so
+the model must **disambiguate** — plus a clean, pilot-gated runner (`pilot.py`). **v1 pilot: 8/8 = 100%.** Per a
+pre-agreed **bounded escalation** we pushed once more — "hard task v2": a 5-lookup chain (added per-zone tax)
+through ~25 records with a near-duplicate-customer distractor ("Globex" vs "Globex Labs") — and got **8/8 =
+100%** again, so we **declared done** (the ≥7/8 stop rule fired). Across four probes — 20/20 clean (S3),
+self-heals malformed (S6), 8/8 v1, 8/8 v2 — **GLM-4.6 shows no measurable natural gap at reasonable mechanical
+difficulty**; studying guardrails on it *requires* injected faults, exactly as S3–S6 did and disclosed. One
+load-bearing insight shaped the hunt: the two guardrails only fix *tool-error* failures, but a hard task's
+natural failures are mostly *wrong-answer, no-error* (a **validation** gap) which neither can see — so a found
+gap would have reopened "build a third guardrail?" rather than rescued the existing two. Choices + the measured
+result are DECISIONS **D20**. All **ten** offline suites green. **Next (S8+):** optional — further guardrails /
+fault types / models; the project's honest deliverable (the injected gap-closure chart + the S6/S7 boundary
+findings) is complete.
 
 > **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
 > natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say

@@ -221,3 +221,146 @@ HARD_SCENARIO = Scenario(
     final_tool="submit_answer",
     ground_truth=GROUND_TRUTH,
 )
+
+
+# ===== HARD TASK V2 — the S7 escalation (DECISIONS D20) ===================
+# v1 (above) scored 8/8 — GLM aced it. v2 pushes difficulty up ONCE more, then we stop (the
+# bounded-escalation rule): a DEEPER chain (a 5th lookup — per-zone tax — so the total is a
+# four-term sum/difference; the math stays trivial) through a BIGGER, more-confusable record set
+# (~25 orders, 4–5 per customer) with a NEAR-DUPLICATE customer name as a distractor ("Globex" vs
+# "Globex Labs", each with its OWN EAST order). Still on-thesis: every added difficulty is a place to
+# thread/pick the WRONG value, not to out-think hard arithmetic. The four schemas above are reused
+# (same tool API); only the backing records change, plus one new tool (get_zone_tax).
+
+ORDERS_V2 = {
+    # Globex (the target customer) — 5 orders, exactly ONE in EAST (the unique target).
+    "ORD-310": {"customer": "Globex",      "item_total_usd": 200, "ship_zone": "WEST"},
+    "ORD-301": {"customer": "Globex",      "item_total_usd": 120, "ship_zone": "EAST"},   # <- target
+    "ORD-130": {"customer": "Globex",      "item_total_usd": 340, "ship_zone": "CENTRAL"},
+    "ORD-103": {"customer": "Globex",      "item_total_usd": 75,  "ship_zone": "NORTH"},
+    "ORD-013": {"customer": "Globex",      "item_total_usd": 260, "ship_zone": "SOUTH"},
+    # Globex Labs — the near-duplicate-name DISTRACTOR; it ALSO has an EAST order (ORD-311).
+    "ORD-311": {"customer": "Globex Labs", "item_total_usd": 180, "ship_zone": "EAST"},
+    "ORD-131": {"customer": "Globex Labs", "item_total_usd": 95,  "ship_zone": "WEST"},
+    "ORD-113": {"customer": "Globex Labs", "item_total_usd": 410, "ship_zone": "CENTRAL"},
+    "ORD-133": {"customer": "Globex Labs", "item_total_usd": 150, "ship_zone": "SOUTH"},
+    # Initech
+    "ORD-220": {"customer": "Initech",     "item_total_usd": 230, "ship_zone": "CENTRAL"},
+    "ORD-202": {"customer": "Initech",     "item_total_usd": 60,  "ship_zone": "EAST"},
+    "ORD-022": {"customer": "Initech",     "item_total_usd": 130, "ship_zone": "WEST"},
+    "ORD-200": {"customer": "Initech",     "item_total_usd": 300, "ship_zone": "NORTH"},
+    # Hooli
+    "ORD-450": {"customer": "Hooli",       "item_total_usd": 175, "ship_zone": "WEST"},
+    "ORD-405": {"customer": "Hooli",       "item_total_usd": 410, "ship_zone": "SOUTH"},
+    "ORD-540": {"customer": "Hooli",       "item_total_usd": 90,  "ship_zone": "EAST"},
+    "ORD-504": {"customer": "Hooli",       "item_total_usd": 220, "ship_zone": "CENTRAL"},
+    # Umbrella
+    "ORD-660": {"customer": "Umbrella",    "item_total_usd": 50,  "ship_zone": "NORTH"},
+    "ORD-606": {"customer": "Umbrella",    "item_total_usd": 130, "ship_zone": "EAST"},
+    "ORD-066": {"customer": "Umbrella",    "item_total_usd": 280, "ship_zone": "WEST"},
+    "ORD-600": {"customer": "Umbrella",    "item_total_usd": 160, "ship_zone": "SOUTH"},
+    # Stark
+    "ORD-715": {"customer": "Stark",       "item_total_usd": 95,  "ship_zone": "CENTRAL"},
+    "ORD-751": {"customer": "Stark",       "item_total_usd": 280, "ship_zone": "WEST"},
+    "ORD-175": {"customer": "Stark",       "item_total_usd": 200, "ship_zone": "EAST"},
+    "ORD-157": {"customer": "Stark",       "item_total_usd": 175, "ship_zone": "SOUTH"},
+}
+SHIP_RATES_V2 = {"WEST": 18, "EAST": 12, "CENTRAL": 9, "NORTH": 22, "SOUTH": 15}
+ZONE_TAX_V2 = {"WEST": 8, "EAST": 5, "CENTRAL": 4, "NORTH": 11, "SOUTH": 7}   # the new 5th-lookup term
+CUSTOMER_DISCOUNTS_V2 = {
+    "Globex": 20, "Globex Labs": 35, "Initech": 15, "Hooli": 30, "Umbrella": 0, "Stark": 25,
+}
+
+TARGET_CUSTOMER_V2 = "Globex"
+TARGET_ZONE_V2 = "EAST"
+
+
+def find_orders_v2(customer: str) -> str:
+    """v2 find_orders — same contract as v1, over the bigger v2 record set. Exact-match on customer,
+    so 'Globex' does NOT return the 'Globex Labs' rows (conflating them is a real wrong-answer trap)."""
+    rows = [{"order_id": oid, "ship_zone": o["ship_zone"]}
+            for oid, o in ORDERS_V2.items() if o["customer"] == customer]
+    if not rows:
+        raise KeyError(f"no orders for customer {customer!r}")
+    return json.dumps(rows)
+
+
+def get_order_v2(order_id: str) -> str:
+    rec = ORDERS_V2.get(order_id)
+    if rec is None:
+        raise KeyError(f"no order {order_id!r}")
+    return json.dumps(rec)
+
+
+def get_ship_rate_v2(zone: str) -> str:
+    rate = SHIP_RATES_V2.get(zone)
+    if rate is None:
+        raise KeyError(f"no shipping zone {zone!r}")
+    return json.dumps({"zone": zone, "rate_usd": rate})
+
+
+def get_zone_tax_v2(zone: str) -> str:
+    """The NEW 5th lookup: a per-zone tax added to the grand total (the deeper-chain lever)."""
+    tax = ZONE_TAX_V2.get(zone)
+    if tax is None:
+        raise KeyError(f"no tax for zone {zone!r}")
+    return json.dumps({"zone": zone, "tax_usd": tax})
+
+
+def get_customer_discount_v2(customer: str) -> str:
+    disc = CUSTOMER_DISCOUNTS_V2.get(customer)
+    if disc is None:
+        raise KeyError(f"no customer {customer!r}")
+    return json.dumps({"customer": customer, "discount_usd": disc})
+
+
+GET_ZONE_TAX_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_zone_tax",
+        "description": "Look up the tax (USD) for a shipping zone; it is added to the grand total.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "zone": {"type": "string", "description": "The shipping zone, e.g. 'EAST'."},
+            },
+            "required": ["zone"],
+        },
+    },
+}
+
+TASK_V2 = (
+    f"Calculate the grand total for the {TARGET_CUSTOMER_V2} order shipping to the {TARGET_ZONE_V2} "
+    "zone, and submit it. The grand total is the order's item total, plus the shipping rate for the "
+    "order's shipping zone, plus the zone's tax, minus the customer's account discount, in USD."
+)
+
+# Ground truth, computed independently: the unique (Globex, EAST) order, then item + ship + tax - disc.
+_target_id_v2 = next(
+    oid for oid, o in ORDERS_V2.items()
+    if o["customer"] == TARGET_CUSTOMER_V2 and o["ship_zone"] == TARGET_ZONE_V2
+)
+_o2 = ORDERS_V2[_target_id_v2]
+GROUND_TRUTH_V2 = (
+    _o2["item_total_usd"]
+    + SHIP_RATES_V2[_o2["ship_zone"]]
+    + ZONE_TAX_V2[_o2["ship_zone"]]
+    - CUSTOMER_DISCOUNTS_V2[_o2["customer"]]
+)  # ORD-301: 120 + 12 + 5 - 20 = 117
+
+HARD_SCENARIO_V2 = Scenario(
+    name="order_grand_total_hard_v2",
+    system_prompt=SYSTEM_PROMPT,
+    task=TASK_V2,
+    tools=[FIND_ORDERS_TOOL, GET_ORDER_TOOL, GET_SHIP_RATE_TOOL, GET_ZONE_TAX_TOOL,
+           GET_CUSTOMER_DISCOUNT_TOOL, SUBMIT_ANSWER_TOOL],
+    registry={
+        "find_orders": find_orders_v2,
+        "get_order": get_order_v2,
+        "get_ship_rate": get_ship_rate_v2,
+        "get_zone_tax": get_zone_tax_v2,
+        "get_customer_discount": get_customer_discount_v2,
+    },
+    final_tool="submit_answer",
+    ground_truth=GROUND_TRUTH_V2,
+)

@@ -527,10 +527,32 @@ no natural gap surfaced at this difficulty.
 - This is the **third** independent signal that GLM-4.6 is robust at multi-step mechanical tool use: 20/20
   on the clean S2 task (S3), self-heals malformed calls (S6), and now 8/8 on a longer, confusable task (S7).
 - **Routing (per the rule above):** no gap → **A (declare done)** *or* **escalate the lever once** (a harder
-  pilot). Brought to Kyle — *pending*. (Even a gap found by escalating would most likely be the row-3
-  *wrong-answer* type, which reopens the A-vs-C question rather than rescuing pure-B.)
+  pilot). Brought to Kyle, who chose to **escalate once** (hard task v2) — resolved below. (Even a gap found
+  by escalating would most likely be the row-3 *wrong-answer* type, which reopens the A-vs-C question
+  rather than rescuing pure-B.)
 - **Cost:** prompt 21,452 / completion 3,205 tokens, ~1 minute — a trivial spend for a decisive answer.
 - **Reproduce:** `uv run pilot.py` (clean baseline, hardened task); `uv run test_scenario_hard.py` (offline).
+
+### Escalation (hard task v2) + final resolution: declare done ⭐
+Per the bounded-escalation rule, we pushed difficulty up once more — "hard task v2": a **5-lookup** chain
+(added a per-zone tax → total = item + shipping + tax − discount) through **~25 records** with a
+**near-duplicate-customer** distractor ("Globex" vs "Globex Labs", each with its own EAST order). Clean
+baseline, N=8.
+- **Result: 8/8 = 100% again** — every run submitted the exact ground truth (117). GLM disambiguated the
+  right customer *and* order, threaded all five lookups, and computed `120 + 12 + 5 − 20` every time.
+- **Resolution (the stop rule fires): declare done (route A).** ≥7/8 was the pre-agreed stop, so we stop —
+  no endless chase. S7's deliverable is this **negative result**, stated plainly.
+- **The finding:** across four independent probes — 20/20 clean (S3), self-heals malformed (S6), 8/8 hard-v1,
+  8/8 hard-v2 (S7) — **GLM-4.6 shows no measurable *natural* gap at reasonable mechanical difficulty.** To
+  study reliability guardrails on this model you must *inject* faults — exactly what S3–S6 did, and disclosed.
+  The injected fault-recovery testbed (+32.5% real for error-recovery, an honest null for retry-nudge) stands
+  as the project's legitimate, honest deliverable.
+- **Why we didn't push further (honesty):** cranking difficulty until a strong model finally slips tends to
+  manufacture either *cognitive* failures (off-thesis — the model can't reason it) or *wrong-answer-no-error*
+  (validation) failures the existing guardrails can't close anyway (row 3 above). Neither rescues pure-B, so
+  more escalation would spend money to *weaken*, not strengthen, the honest story.
+- **Reproduce:** `uv run pilot.py v2` (clean baseline, hard task v2); both pilots are offline-guarded by
+  `uv run test_scenario_hard.py`.
 
 ### Plain-English terms
 - *natural gap* = GLM failing on a **clean** task (no injected faults) just because the task is genuinely
