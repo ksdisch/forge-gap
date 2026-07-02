@@ -190,6 +190,22 @@ uv run weak_ablation.py mistralai/mistral-nemo 20     # args: model, N runs (cle
 Offline, the guardrail is covered without API calls by `uv run test_submit_nudge.py` and the vendored figure
 data by `uv run test_chart.py`. The full reasoning is in `docs/DECISIONS.md` **D21**.
 
+## Architecture & State Management
+
+To isolate and measure the guardrail deltas accurately without cross-contamination, the evaluation harness is built with strict boundaries around concurrency and state:
+
+* **The Error Boundary (Silent Recovery):** In the `+error-recovery` arm, transient failures (like 503s) are caught exactly at the tool-execution boundary via `dispatch_with_recovery`. The harness intercepts the failure and executes a bounded retry loop. Crucially, this happens *outside* the model's awareness—the 503s are never appended to the conversation history, preventing token-bloat and turn-exhaustion.
+* **State Mutation (Retry Nudges):** For permanent errors like a 400 Malformed Call (in the `+retry-nudge` arm), the harness intentionally mutates state. It packages the error hint into a synthetic `user` message (e.g., "Your last tool call failed... correct the arguments") and appends it to the trajectory. This forces the model to spend a turn correcting its own syntax.
+* **Concurrency & Trial Isolation:** `runner.py` is designed to execute N-trial ablations. To prevent race conditions in the trajectory logs during multi-trial runs, each trial cleanly instantiates its own isolated `messages` array and localized oracle instance. There is no shared mutable state during the reason/act/observe loop.
+
+## Limitations & Next Steps
+
+This project is a controlled testbed built to quantify mechanical agent failures. As a result, it has known boundaries:
+
+* **The Semantic Blind Spot:** The implemented guardrails rely entirely on typed exceptions (e.g., HTTP 503s, 400 Bad Requests). They successfully catch and recover from mechanical and infrastructure failures, but are intentionally blind to semantic failures (e.g., the model hallucinating a math calculation without throwing a Python exception). 
+* **Recovering the "Natural" Gap:** This phase of the project tested GLM-4.6 via a managed API (OpenRouter). Because frontier models are highly optimized for instruction following and rarely fail mechanical tasks naturally, it required *injecting* faults (S3) to create a measurable gap. 
+* **Next Step (Local 8B):** The immediate next phase drops the managed API proxy and points the harness at a locally hosted model (e.g., `Meta-Llama-3-8B-Instruct` via `llama.cpp` or Ollama). This will recover the true "self-hosted" infrastructure gap the original *Forge* paper highlights, measuring how a weaker model relies on retry-nudges to survive natural syntax hallucinations.
+
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
 - OpenRouter tool-calling: https://openrouter.ai/docs/guides/features/tool-calling

@@ -668,3 +668,138 @@ The pilot's signal held at scale. On the **clean** task (no injection), **mistra
   (`max_retries=8` in `glm.py`) so a blip doesn't abort an arm — HTTP hygiene, not a measured mechanism.
 - **Reproduce:** `uv run weak_ablation.py mistralai/mistral-nemo 20` (live); `uv run test_submit_nudge.py` +
   `uv run test_chart.py` (offline). All **eleven** offline suites green.
+
+## D22 — S9 = the validation guardrail (Option A): recompute-from-retrieved-evidence, ablated on mistral-nemo *stacked on* submit-nudge ⭐ *(scope signed off 2026-06-30; this is the start-of-stage brief — awaiting design sign-off before any code)*
+
+This is a **start-of-stage brief** (written before the code, per the per-stage rhythm). It records the
+scope we locked, the guardrail's design, the one load-bearing honesty question ("how do you validate
+*without* the answer key?"), the testbed pick and the evidence behind it, and the pilot that de-risks the
+paid run. **The `⭐` marks a load-bearing entry.** Nothing here is built yet.
+
+### The choice (scope signed off 2026-06-30)
+Make S9 the project's **fourth guardrail — validation** (a *self-consistency* check on the model's final
+answer), closing the **last uncovered failure row**: *wrong answer, no tool error* (D20 row 3 · the D21
+residual · the ROADMAP "Parked" note). This completes the thesis — every failure class now has its matched
+guardrail:
+
+| Failure type | Matched guardrail | Prior result |
+| --- | --- | --- |
+| Transient tool error (503) | error-recovery (S4) | +32.5 pp ✓ (injected) |
+| Malformed call | retry-nudge (S6) | null — GLM self-heals |
+| Never submits (right answer, no terminal call) | submit-nudge (S8) | +75 pp ✓ (natural) |
+| **Wrong answer, no error** (retrieved data, computed wrong) | **validation (S9)** | **← this stage** |
+
+- **Scope options weighed:** (A) **build the validation guardrail** ✅ · (B) **capability ladder** — run S8's
+  submit-nudge harness across 2–3 models for a lift-vs-capability curve (mechanical, reuses everything, but
+  no new mechanism/insight and more live-call spend) · (C) **declare done & write up** — treat S4/S6/S7/S8 as
+  the finished deliverable (lowest effort; leaves the last row uncovered).
+- **Why (A):** it closes the exact row the project keeps pointing at, so it *completes* the "each failure →
+  its matched guardrail" story rather than adding breadth. It's the most novel and the most defensible under
+  scrutiny — the "validate without the answer key" design (below) is precisely the methodological care that
+  reads as real engineering maturity. It stays fully on-thesis (mechanical failure, deterministic guardrail,
+  Wilson/Newcombe CIs) and reuses the whole harness. Chosen over (B) (thinner — "more of the same") and (C)
+  (stops one guardrail short of the capstone, and this one is within reach on the existing testbed).
+
+### The failure it targets — and the evidence it's real *and* clean (a trajectory read, not a guess)
+S8 left a residual: with submit-nudge on, mistral-nemo submitted the wrong `140` in **5/20** runs (item total
+with **shipping silently forgotten**). Before choosing a testbed we **hand-read all 20 submit-nudge
+trajectories** (`runs/submit_nudge/trial-*.jsonl` from the S8 run). Every one of the 5 wrong runs (trials 06,
+09, 13, 16, 17) had **retrieved *both* inputs correctly** — `get_order` → `item_total_usd=140` **and**
+`get_ship_rate` → `rate_usd=18` — then submitted `140` anyway. Zero wrong-record contamination; **100% pure
+arithmetic/aggregation slip on correctly-retrieved evidence.** That is the textbook validation target: a check
+that recomputes `140 + 18 = 158` from *the model's own retrieved data* catches all 5 — no answer key needed.
+
+### The mechanism (new): `validate` — recompute from the model's own evidence, re-prompt on a mismatch
+A fourth toggle on `agent.run()` (sibling to `recover` / `nudge` / `submit_nudge`). When the model calls the
+terminal tool `submit_answer(value)`, **before accepting it as final**:
+1. Reconstruct the **evidence** — the tool results the model actually received this run (the parsed
+   `get_order` / `get_ship_rate` JSON it observed).
+2. **Recompute** the expected total from that evidence, using the scenario's declared aggregation rule (sum
+   the retrieved line items). This lives in the **scenario** (a new `Scenario.validate` callable), so the
+   guardrail stays task-agnostic — it just calls `scenario.validate(submitted, observations)`.
+3. If `value` **matches** the recomputed total → accept and stop (a normal submit).
+4. If it **doesn't match** → *don't* accept: append one corrective re-prompt naming the retrieved components
+   ("your total 140 doesn't match the data you retrieved: item total 140 and shipping 18 must both be included —
+   recompute and resubmit"), count a `validation` nudge, and continue the loop (up to `max_steps`). Like
+   retry-nudge / submit-nudge it spends a **model turn**; unlike them it fires on a *submitted-but-inconsistent*
+   answer, not a *failed* or *missing* call.
+
+### The honesty crux (load-bearing ⭐): self-consistency, NOT an answer key
+The obvious objection: *"the oracle knows the answer is 158 by computing `item_total + rate`; if the validator
+computes the same thing, haven't you just put the oracle inside the agent and forced 100%?"* The answer is no,
+and the distinction is the whole integrity of the stage — it's the **input** each one reads:
+- The **oracle** (`oracle.py`) computes from the **canonical records** (`ORDERS[TARGET_ORDER]`, `SHIP_RATES`),
+  keyed by the *true* target order. It is authoritative and independent of the model; it can **never** be fooled.
+- The **validator** computes from the **model's own retrieved observations** — whatever the model actually
+  pulled back this run. It is only as good as the model's retrieval, and it **can** be fooled: feed it a
+  *wrong-record* retrieval and it recomputes a self-consistent *wrong* total and accepts it (the oracle still
+  fails it). So the validator does **not** trivially force an oracle-pass.
+- Therefore it is a **self-consistency check** ("is your submitted number consistent with the evidence *you*
+  gathered?"), a real deployable verifier pattern — not an answer key. The lift it measures = the fraction of
+  wrong answers that were internal-consistency violations (right evidence, wrong arithmetic). Its structural
+  **blind spot** (wrong-retrieval → self-consistent wrong answer) is disclosed, not hidden.
+- **Two bright lines the code must honor:** (1) the validator **never reads `scenario.ground_truth`** — only
+  the run's tool observations; (2) encoding the *aggregation rule* (sum the retrieved items) is the same
+  narrow task/protocol knowledge every guardrail carries (error-recovery "knows" to retry transient; submit-nudge
+  "knows" to call the terminal tool) — it is **not** the answer. On this nemo testbed retrieval is always
+  correct, so the blind spot doesn't bite — but we state it plainly regardless.
+
+### The testbed (signed off): mistral-nemo, *stacked on* submit-nudge
+- **Options weighed:** (1) **mistral-nemo stacked on submit-nudge** ✅ · (2) **Llama-3.1-8B** (the parked
+  target) — **rejected for now**: bigger headroom (~100% baseline fail) but a *messier* failure mix
+  (hallucinated numbers, literal formula-strings, likely some bad retrieval), so much of its gap may be
+  **un-validatable**; it needs a fresh fit-pilot to even characterize. Kept as a future harder testbed.
+- **Why (1):** the trajectory read proved nemo's failures are the *cleanest possible* validator target
+  (retrieved both inputs, forgot to add → 5/5 catchable from evidence, zero wrong-record noise), it **continues
+  S8's exact testbed**, and it tells a clean **two-layer** story in one picture: submit-nudge gets the model to
+  *submit*, validation gets it to submit *correctly*.
+- **Why "stacked":** nemo's bare baseline is **0/20** (it never submits), so validation *alone* would have
+  nothing to validate — the validation gap is *masked* by the no-submit gap until submit-nudge lifts it. So the
+  honest controlled comparison **holds submit-nudge fixed and toggles validation**.
+
+### The experiment: a 2-arm *stacked* ablation, **N=40**
+| Arm | Config | Expectation | Role |
+| --- | --- | --- | --- |
+| `submit_nudge` (reference) | `submit_nudge=True` | ~75% | the layer below — the "baseline" for *this* ablation |
+| `submit_nudge+validation` | `submit_nudge=True, validate=True` | ~95–100% | the matched guardrail; expected to lift |
+
+- Same **Wilson** per arm + **Newcombe** gap (mechanism vs the submit-nudge reference) + the **straddles-zero**
+  honesty gate (D16). Reuses `run_arms`; a new `validation_ablation.py` sets the reference arm to
+  submit-nudge. For the figure, the bare **0%** baseline is shown as a context bar so the honest **full ladder**
+  reads `0% → 75% → ~100%`.
+- **Why N=40, not 20** (computed with `stats.py`, assuming validation catches the slips): the residual is a
+  *smaller* effect than S8's headline (75% base, only 25% headroom), so N=20 is **knife-edge** — catch-all-5
+  clears zero by a hair (75%→100%, Newcombe **[+3.8%, +46.9%]**) but catch-4-of-5 goes **null** (75%→95%,
+  **[−3.2%, +42.3%]**). **N=40 is robust** — it clears zero even at catch-4-of-5 (75%→95%, **[+4.2%, +35.6%]**;
+  catch-all-5 → **[+11.1%, +40.2%]**). nemo is cheap, so N=40 × 2 arms is still pennies.
+
+### The honesty risk to weigh BEFORE the paid run (load-bearing)
+- **It may null** if the weak model, once re-prompted, just *resubmits 140* instead of correcting. That's the
+  same null-risk shape as S6, and either outcome is a real finding under the CI gate ("validation recovers the
+  arithmetic-slip gap" **or** "even told it's inconsistent, this model won't fix it at N"). The **pilot** below
+  checks exactly this before we spend.
+- **Re-prompt verbosity is a sub-knob** (a "how loud is the hint" dial, to pin at pilot time): the re-prompt
+  **names the retrieved components (140 and 18) and the rule (both must be included), but does NOT state the sum
+  158** — so the model still does the (trivial, by-design) addition itself and the guardrail is a *consistency
+  checker*, not a *solver*. If the pilot shows that terse form doesn't lift, we may state the recomputed total —
+  and **disclose** that we did (it shifts the reading toward "the harness supplied the answer").
+- **The "is it cheating?" question is answered above** (self-consistency, never `ground_truth`); the code
+  review for S9 must verify the two bright lines hold.
+
+### The pilot (the de-risk)
+- **`submit_nudge=True, validate=True`, mistral-nemo, N=8, clean.** Gate: does validation **fire** on the `140`
+  runs and **lift** completion over the ~75% submit-nudge base? **Hand-read** the caught runs to confirm they
+  become genuine `158` resubmissions (not artifacts). ~pennies. Only on a clean lift do we spend the full N=40;
+  if it's flat, we either dial the re-prompt louder (disclosed) or report the null.
+
+### Plain-English terms
+- *validation guardrail* = a check that the model's **answer** is right / self-consistent before the run
+  accepts it — catches *wrong-answer-no-error* failures the tool-error guardrails (error-recovery, retry-nudge)
+  and the protocol guardrail (submit-nudge) structurally cannot see.
+- *self-consistency check* = "does your answer match the evidence **you** gathered?" — recomputed from the
+  model's own tool results, **not** from the grader's ground truth (which would be an answer key).
+- *stacked ablation* = an ablation whose "baseline" already has one guardrail on (here submit-nudge), so a
+  *second* guardrail (validation) is measured on top — used when the lower guardrail is what makes the higher
+  one's failure visible at all.
+- *scaffolding* = a mechanism (submit-nudge) whose job here is to **expose** the failure another mechanism
+  (validation) targets, by clearing the failure that was masking it.
