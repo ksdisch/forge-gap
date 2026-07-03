@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 
 from chart import (
+    HALLUCINATION_DATA_PATH,
     MULTI_DATA_PATH,
     VALIDATION_DATA_PATH,
     WEAK_DATA_PATH,
@@ -26,6 +27,7 @@ from chart import (
     fmt_pp_ci,
     gap_label,
     gap_tag,
+    hallucination_caption,
     is_win,
     load_summary,
     multi_caption,
@@ -248,6 +250,39 @@ def test_vendored_validation_matches() -> None:
           close(s["arms"][1]["gap_vs_baseline"]["delta"], 0.25))
 
 
+# --- S10: the UN-stacked hallucination figure's pure helper + vendored data ---
+def test_hallucination_caption() -> None:
+    print("hallucination_caption — honesty disclosure for the UN-stacked messy-gap figure")
+    s = load_summary(HALLUCINATION_DATA_PATH)
+    cap = hallucination_caption(s)
+    for piece in ("N=40", "CLEAN task", "temp 0.7", "meta-llama/llama-3.1-8b-instruct", "NATURAL",
+                  "UN-VALIDATABLE", "wrong-record (validator fooled"):
+        check(f"hallucination caption mentions '{piece}'", piece in cap)
+    check("hallucination caption never claims the gap is INJECTED (it's natural)", "INJECTED" not in cap)
+    check("hallucination caption decomposes the residual (never-retrieved slice)",
+          "never-retrieved" in cap)
+
+
+def test_vendored_hallucination_matches() -> None:
+    print("vendored hallucination data — the exact S10 un-stacked result (the figure's source of truth)")
+    s = load_summary(HALLUCINATION_DATA_PATH)
+    check("model == meta-llama/llama-3.1-8b-instruct", s["model"] == "meta-llama/llama-3.1-8b-instruct")
+    check("N == 40", s["n"] == 40)
+    check("fault_kind == none (clean, no injection)", s["fault_kind"] == "none")
+    check("reference arm is the BARE baseline (un-stacked)", s["baseline_label"] == "baseline")
+    check("two arms, in order",
+          [a["label"] for a in s["arms"]] == ["baseline", "validation_only"])
+    check("baseline 0/40 = 0% (llama's natural gap is total)",
+          s["arms"][0]["correct"] == 0 and s["arms"][0]["rate"] == 0.0)
+    check("validation_only 18/40 = 45%",
+          s["arms"][1]["correct"] == 18 and close(s["arms"][1]["rate"], 0.45))
+    check("validation fired 20 re-prompts (the mechanism DID work)", s["arms"][1]["validations"] == 20)
+    check("validation gap clears 0 -> a real result",
+          s["arms"][1]["gap_vs_baseline"]["excludes_zero"] is True)
+    check("validation delta == 0.45 (the checkable slice, not a fix-all)",
+          close(s["arms"][1]["gap_vs_baseline"]["delta"], 0.45))
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -265,6 +300,8 @@ def main() -> int:
         test_vendored_weak_matches,
         test_validations_spent_and_validation_caption,
         test_vendored_validation_matches,
+        test_hallucination_caption,
+        test_vendored_hallucination_matches,
     ):
         t()
         print()
