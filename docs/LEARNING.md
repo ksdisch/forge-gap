@@ -580,6 +580,86 @@ Because there are *two* natural failures stacked here. Submit-nudge fixes the *p
 
 ---
 
+## S9 — The validation guardrail: submit *right*, not just submit (+25 pp)
+
+**What we built.** S8 ended one guardrail short: submit-nudge got mistral-nemo to *submit*, but ~25% of the
+time it submitted `140` — the item total with shipping silently forgotten. No tool errored; the model just
+summed wrong. That's the **last** failure type the project hadn't closed: *wrong answer, no error*. S9 builds
+the fourth and final guardrail for it — **validation** — plus its stacked experiment:
+
+- **validation** — a new `validate` toggle in `agent.py`. When the model calls `submit_answer(value)`, before
+  accepting it the harness calls `scenario.validate(...)`, which **recomputes the total from the model's own
+  retrieved tool results** and, if `value` doesn't match, re-prompts ("your `140` doesn't match — the total
+  must add both the item total `140` *and* the shipping `18`; recompute and resubmit") and keeps looping.
+- `scenario.validate` in `scenario.py` — the recompute function, test-driven via `test_validation.py` (12 tests).
+- `validation_ablation.py` — the **stacked** 2-arm experiment (submit-nudge reference vs +validation) on the
+  clean task, and a new `validation-gap.png` figure (`chart.py`).
+
+**The honest hard part — validate *without* the answer key.** The obvious objection: the oracle already knows
+the answer is `158`; if the validator computes the same thing, haven't you just smuggled the answer key into the
+agent and forced 100%? The answer is **no**, and the difference is *what each one reads*:
+
+- the **oracle** computes from the **canonical records** (the true order) — authoritative, unfoolable;
+- the **validator** computes from **whatever the model actually retrieved this run** — so it can be *fooled* by
+  a wrong-record retrieval (it would happily accept a self-consistent-but-wrong total; the oracle still fails it).
+
+So it's a **self-consistency check** ("does your answer match the evidence *you* gathered?"), not an answer key.
+Its blind spot (wrong retrieval → self-consistent wrong answer) is the very thing that keeps it honest — it can
+only close the *arithmetic-slip* slice of the wrong-answer gap, not manufacture a pass. Two bright lines the code
+holds: it **never reads `scenario.ground_truth`**, and the re-prompt names the parts (`140`, `18`) but **not** the
+sum `158`, so the model still does the addition itself — a *checker*, not a *solver*.
+
+**Why "stacked."** mistral-nemo's bare baseline is 0% (it never submits), so there's *nothing to validate* until
+submit-nudge lifts it into view. The clean controlled comparison therefore **holds submit-nudge fixed and toggles
+validation** — the "baseline" for this ablation is itself the submit-nudge arm.
+
+**The result.** Pilot-gated (N=8: validation fired on the one `140` it saw and lifted 75%→100%), then the full run
+on **mistral-nemo, N=40**: **submit-nudge (reference) 75% · +validation 100%**, gap **+25.0 pp, Newcombe 95% CI
+[+11.1, +40.2]** — clears 0, non-overlapping Wilson bars, a **real** result. Across pilot + full, validation fired
+on **6/6** of the `140`s it ever saw and converted **every one** to a genuine `158`. The full ladder on this model
+is now **0% → 75% → 100%**, and the matched-guardrail thesis is complete.
+
+**Teaching note.** The keeper idea: **a self-check can be rigorous without being an oracle.** The temptation with a
+"validate the answer" guardrail is to check against the truth — but that's circular (you can't deploy a checker that
+already knows the answer). The honest version checks the answer against the model's *own evidence*: cheap, deployable
+in the real world (you rarely have ground truth at run time, but you always have what the agent just fetched), and it
+has a *principled* blind spot you disclose rather than hide. The +25 pp it measures is exactly "how much of the
+wrong-answer gap was the model fumbling arithmetic it had the pieces for" — an honest, bounded claim.
+
+**New words.** *validation guardrail*, *self-consistency check*, *stacked ablation*, *scaffolding*, *incremental
+(marginal) lift*.
+
+**Recall — try before you reveal:**
+
+Q1. Why is recomputing the total *inside the agent* not "cheating," given the oracle grades against the same
+`158`?
+
+<details><summary>answer</summary>
+
+Because the two compute from different inputs. The oracle reads the *canonical records* (the true order) — it's authoritative and can't be fooled. The validator reads only *what the model retrieved this run* — so if the model had fetched the wrong record, the validator would recompute a self-consistent *wrong* total and accept it (the oracle would still fail it). It's a *self-consistency* check ("does your answer match your own evidence?"), not an *answer* check ("is your answer the truth?"). It never reads `scenario.ground_truth`. So it can't force a pass — it only catches the case where the model had the right pieces and summed them wrong.
+
+</details>
+
+Q2. Why was the validation experiment *stacked* on submit-nudge (75% reference → 100%) instead of run against the
+bare 0% baseline like S8?
+
+<details><summary>answer</summary>
+
+Because on the bare baseline mistral-nemo never submits (0%) — so there's no submitted answer for a validator to check. The validation gap is *masked* by the no-submit gap: you can't measure "does it submit the *right* number" until you've first got it to submit at all. Submit-nudge is the scaffolding that exposes the validation failure; the honest controlled comparison holds submit-nudge fixed and toggles only validation, so the +25 pp is validation's *own* (incremental) contribution, not the two guardrails' combined lift.
+
+</details>
+
+Q3. The +25 pp gap is smaller than S8's +75 pp. Why did we run N=40 instead of N=20, and how did we decide that
+*before* spending?
+
+<details><summary>answer</summary>
+
+Because the effect is smaller, the confidence intervals have to be tighter to prove it's real. Using `stats.py` up front, we checked: at N=20 the result is knife-edge — 75%→100% clears zero only by a hair, and if validation caught just 4 of every 5 slips (75%→95%) the Newcombe interval would straddle 0 → a null. At N=40 it clears zero even in that 4-of-5 case. The binding constraint on this project is the statistics (the noise floor), not the code — so a smaller effect needs a bigger N, and mistral-nemo is cheap enough to just pay for it. (A cheap N=8 pilot still ran first, only to confirm the mechanism fires and lifts at all.)
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -639,7 +719,7 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **N-arm ablation** — running *N* arms (not just two) over one shared fault, each with a Wilson CI and a Newcombe gap vs the baseline (`ablation.run_arms`); generalises the S4 two-arm harness at the seam.
 - **pilot run** — a tiny, cheap trial run done first to de-risk a bigger, costlier one (the N=6 pilot that caught the S6 null before the full run).
 - **natural gap** — a model failing on a *clean* task (no injected faults) because the task is genuinely hard, as opposed to the *injected* gaps of S3–S6. S7 hunted one on GLM-4.6 and found none.
-- **validation gap / guardrail** — a *validation gap* is a failure where the model submits a *wrong answer with no error* (wrong record/field, a dropped term); a *validation guardrail* would check the answer's correctness/consistency before accepting it. Neither error-recovery nor retry-nudge (which fire only on tool *errors*) can close a validation gap.
+- **validation gap / guardrail** — a *validation gap* is a failure where the model submits a *wrong answer with no error* (wrong record/field, a dropped term); a *validation guardrail* checks the answer's consistency before accepting it. Neither error-recovery nor retry-nudge (which fire only on tool *errors*) nor submit-nudge (a *missing* call) can close a validation gap. **Built in S9** (the `validate` toggle) and measured at **+25 pp** on mistral-nemo's arithmetic-slip residual.
 - **failure triage** — hand-reading a run's trajectory to classify *why* it failed (transient error / malformed call / wrong-answer-no-error / no-submit / max-steps), not just that it did.
 - **bounded escalation** — a pre-committed rule allowing task difficulty to be raised only a fixed number of times, with a hard stop (S7: escalate once; if GLM still scores ≥7/8, declare done) — so a gap hunt can't become an open-ended chase.
 - **at ceiling** — scoring at (or statistically indistinguishable from) 100%, leaving no room to measure an improvement; GLM-4.6 is at ceiling on both the clean and the hardened tasks.
@@ -650,3 +730,7 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **bifurcation** — when a probe splits into two qualitatively different outcomes rather than a tidy middle (here, two weak models failing 0% in two *different* ways: hallucinated answer vs no-submit); the signal that triggered S8's pivot.
 - **fit pilot** — a tiny baseline-only run used to check whether a candidate model lands in the measurable "sweet spot" (not ~100%, not ~0%) *before* committing to a full ablation — model-selection's version of the S6/S7 pilot.
 - **capability × guardrail interaction** — the S8 thesis: how much a guardrail helps depends on the *model's* capability — a submit-nudge is worthless on GLM-4.6 (it always submits) but worth +75 pp on mistral-nemo (which forgets to). The claim is the interaction, not "model X is bad."
+- **self-consistency check** — validating an answer against the evidence the model *itself* gathered this run (its own tool results), **not** against the grader's ground truth. The S9 guardrail: it recomputes the total from the retrieved data, so it catches "had the pieces, summed wrong" but can be fooled by a wrong-record retrieval — a principled blind spot that keeps it from being a smuggled answer key.
+- **stacked ablation** — an ablation whose reference arm already has one guardrail switched on (here submit-nudge), so a *second* guardrail (validation) is measured *on top* of it. Used when the lower guardrail is what makes the higher one's failure visible at all (you can't measure "submits the right number" until you've got it to submit).
+- **scaffolding** — a guardrail whose role in an experiment is to *expose* the failure another guardrail targets, by clearing the failure that was masking it (submit-nudge is scaffolding for the S9 validation measurement: 0% → 75% first, so the wrong-answer residual becomes measurable).
+- **incremental (marginal) lift** — the extra completion a guardrail adds *over the arm below it*, not over the bare baseline. S9 reports validation's incremental lift over submit-nudge (75% → 100% = +25 pp), which isolates validation's own contribution from submit-nudge's.

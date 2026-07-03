@@ -31,6 +31,10 @@ MULTI_OUT_PATH = os.path.join("docs", "figures", "malformed-gap.png")
 WEAK_DATA_PATH = os.path.join("docs", "figures", "weak-gap-data.json")
 WEAK_OUT_PATH = os.path.join("docs", "figures", "weak-gap.png")
 
+# S9: the STACKED validation figure (submit-nudge reference vs +validation, CLEAN task, weak model).
+VALIDATION_DATA_PATH = os.path.join("docs", "figures", "validation-data.json")
+VALIDATION_OUT_PATH = os.path.join("docs", "figures", "validation-gap.png")
+
 # Palette: muted gray for the no-help baseline, positive teal for a mechanism that really lifts,
 # neutral steel for a mechanism whose gap straddles 0 (a null — colour follows the measured verdict,
 # never the hoped-for one, so the figure can't over-claim).
@@ -158,6 +162,29 @@ def weak_caption(s: dict) -> str:
     )
 
 
+# --- S9: pure helpers for the STACKED validation figure ----------------------
+
+def validations_spent(s: dict) -> int:
+    """Total validation re-prompts the validation arm issued (0 if there is no such arm)."""
+    for a in s["arms"]:
+        if a["label"] == "validation":
+            return a.get("validations", 0)
+    return 0
+
+
+def validation_caption(s: dict) -> str:
+    """Honesty caption for the S9 validation figure. The gap is NATURAL (no injection) and the ablation
+    is STACKED: the reference arm is itself submit-nudge (the S8 layer) on a model whose BARE baseline is
+    0%, so the full ladder is 0% → 75% → 100%. Validation recomputes the total from the model's OWN
+    retrieved tool results — a self-consistency check, NEVER the oracle's answer key — so it can be fooled
+    by wrong-record retrieval (here retrieval is always correct, so the residual is pure arithmetic slip)."""
+    return (
+        f"N={s['n']} runs  ·  CLEAN task, NO fault injection  ·  temp {s['temperature']}  ·  {s['model']}\n"
+        f"NATURAL gap · ladder 0% (S8 bare) → 75% +submit-nudge → 100% +validation  ·  "
+        f"validation recomputes from the model's OWN retrieved data (self-consistency, not the answer key)"
+    )
+
+
 # --- the figure (matplotlib; smoke-verified by running chart.py) --------------
 
 def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
@@ -226,7 +253,8 @@ def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
 
 
 def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
-                       caption_fn=multi_caption, subtitle: str | None = None) -> str:
+                       caption_fn=multi_caption, subtitle: str | None = None,
+                       suptitle: str | None = None, arm_display: dict | None = None) -> str:
     """Draw an N-bar ablation from an `arms`-shaped summary `s`; write `out_path`.
 
     One completion-rate axis, one bar per arm, each with its Wilson whisker + k/N label. Bars are
@@ -234,9 +262,11 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
     Newcombe gap vs the shared baseline. Holding the fault fixed and varying only the mechanism is what
     makes the 'each guardrail fixes its own failure' story legible (DECISIONS D19).
 
-    `caption_fn` and `subtitle` let one renderer serve both the S6 *injected* malformed figure (the
-    defaults) and the S8 *natural*-gap figure (pass `weak_caption` + a clean-task subtitle), so the
-    honesty caption always matches the actual testbed instead of hardcoding 'INJECTED'."""
+    `caption_fn` and `subtitle` let one renderer serve the S6 *injected* malformed figure (the defaults)
+    and the S8 *natural*-gap figure (pass `weak_caption` + a clean-task subtitle), so the honesty caption
+    always matches the actual testbed. `suptitle` and `arm_display` add the same override seam for the S9
+    *stacked* figure, whose reference arm is submit-nudge (not a bare baseline) and whose headline is a
+    different claim — so it needs its own title and x-labels while reusing all the drawing logic."""
     import matplotlib
     matplotlib.use("Agg")  # headless backend: render straight to a file, no display
     import matplotlib.pyplot as plt
@@ -272,8 +302,9 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
         ax.text(xi, 4, gap_tag(a), ha="center", va="bottom", fontsize=9, color="#222222",
                 bbox=dict(boxstyle="round,pad=0.35", fc="#f7f7f7", ec=col, lw=1.2))
 
+    display_map = arm_display or ARM_DISPLAY
     ax.set_xticks(xs)
-    ax.set_xticklabels([ARM_DISPLAY.get(a["label"], a["label"]) for a in arms], fontsize=10.5)
+    ax.set_xticklabels([display_map.get(a["label"], a["label"]) for a in arms], fontsize=10.5)
     ax.set_ylabel("Task completion rate", fontsize=12)
     ax.set_ylim(0, 118)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
@@ -285,14 +316,17 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
         ax.spines[spine].set_visible(False)
 
     # Title follows the measured verdict — a win only if some mechanism's gap actually clears 0.
+    # An explicit `suptitle` override wins (S9's claim differs from the auto-derived one).
     any_win = any(is_win(a) for a in arms[1:])
-    if s["fault_kind"] == "none":  # S8: a natural gap (no injection) reads differently than a fault gap
-        suptitle = ("A matched guardrail closes a weak model's natural gap" if any_win
-                    else "No guardrail beats the baseline on the clean task")
+    if suptitle is not None:
+        _suptitle = suptitle
+    elif s["fault_kind"] == "none":  # S8: a natural gap (no injection) reads differently than a fault gap
+        _suptitle = ("A matched guardrail closes a weak model's natural gap" if any_win
+                     else "No guardrail beats the baseline on the clean task")
     else:
-        suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
-                    else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
-    fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=0.98)
+        _suptitle = (f"A matched guardrail closes the {s['fault_kind']}-fault gap" if any_win
+                     else f"On {s['fault_kind']} faults, no guardrail beats the baseline")
+    fig.suptitle(_suptitle, fontsize=14, fontweight="bold", y=0.98)
     ax.set_title(subtitle or "GLM-4.6 · multi-step tool task · injected MALFORMED-call testbed",
                  fontsize=10, color="#666666", pad=10)
     fig.text(0.5, 0.015, caption_fn(s), ha="center", va="bottom",
@@ -335,6 +369,28 @@ def main() -> int:
             subtitle="mistral-nemo · multi-step tool task · CLEAN (no injection) · natural no-submit gap")
         print(f"wrote {wout}")
         for a in ws["arms"]:
+            tail = ""
+            if "gap_vs_baseline" in a:
+                gg = a["gap_vs_baseline"]
+                v = "REAL" if gg["excludes_zero"] else "null"
+                tail = f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}"
+            print(f"  {a['label']:<16} {pct(a['rate'])} ({a['correct']}/{a['n']}){tail}")
+
+    # S9: render the STACKED validation figure too, if its vendored data is present. Its reference arm is
+    # submit-nudge (the S8 layer), so the gap it reports is validation's INCREMENTAL lift; the bare 0%
+    # baseline lives in the caption's full-ladder line rather than as a bar (DECISIONS D22).
+    if os.path.exists(VALIDATION_DATA_PATH):
+        vs = load_summary(VALIDATION_DATA_PATH)
+        vout = build_multi_figure(
+            vs, out_path=VALIDATION_OUT_PATH, caption_fn=validation_caption,
+            subtitle="mistral-nemo · CLEAN task · validation stacked on submit-nudge · natural wrong-answer gap",
+            suptitle="Validation closes the weak model's residual wrong-answer gap",
+            arm_display={
+                "submit_nudge": "Submit-nudge\n(gets it to submit — S8)",
+                "validation": "+ Validation\n(gets it to submit RIGHT)",
+            })
+        print(f"wrote {vout}")
+        for a in vs["arms"]:
             tail = ""
             if "gap_vs_baseline" in a:
                 gg = a["gap_vs_baseline"]

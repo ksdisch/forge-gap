@@ -803,3 +803,40 @@ and the distinction is the whole integrity of the stage — it's the **input** e
   one's failure visible at all.
 - *scaffolding* = a mechanism (submit-nudge) whose job here is to **expose** the failure another mechanism
   (validation) targets, by clearing the failure that was masking it.
+
+### Measured result (S9): validation closes the residual wrong-answer gap (+25 pp, REAL) ⭐
+The pilot's signal held at scale. On the **clean** task (no injection), **mistral-nemo**, **N=40**, temp 0.7,
+the stacked ablation (both arms carry submit-nudge; validation is toggled on top):
+
+| Arm | Completion | Wilson 95% CI | Gap vs submit-nudge (Newcombe 95% CI) | Verdict |
+| --- | --- | --- | --- | --- |
+| submit_nudge (reference) | 30/40 = 75.0% | [59.8%, 85.8%] | — | reproduces S8 exactly; 10 misses submit `140` |
+| **+validation** | **40/40 = 100.0%** | **[91.2%, 100%]** | **+25.0 pp [+11.1, +40.2]** | **REAL — clears 0** (fired **5** validations) |
+
+- **A real result by every gate:** the Newcombe interval clears 0 *and* the two Wilson bars don't overlap
+  (submit-nudge ≤85.8% vs +validation ≥91.2%). Figure: `docs/figures/validation-gap.png` (README §10).
+- **The mechanism verified in the trajectories (the pilot gate, done by hand):** validation fired on **6/6**
+  of the `140` submissions it ever saw across the pilot + full run and converted **every one** to a genuine
+  `158` resubmission — zero mismatches. A textbook trace (validation-arm trial-01): the model fetched the rate
+  (`18`) and submitted `140` in the *same* turn; validation recomputed `140 + 18 = 158` from the just-threaded
+  tool result, rejected `140`, and the model corrected to `158` on the next turn. The `evidence` it logged
+  (`item_total_usd: 140, rate_usd: 18, expected: 158`) is recomputed from *retrieved data*, never `ground_truth`.
+- **The completed thesis:** every failure class now has its matched guardrail, each measured under the same CI
+  gate — transient→error-recovery (+32.5 pp, injected), malformed→retry-nudge (null, GLM self-heals),
+  no-submit→submit-nudge (+75 pp, natural), **wrong-answer→validation (+25 pp, natural)**. And **guardrail
+  specificity** holds a fourth time: on this same testbed retry-nudge (S8) and error-recovery are inert — only
+  the guardrail *matched* to the failure moves the number.
+- **The honesty crux, upheld in code (the load-bearing bright lines):** the validator reads only the run's tool
+  observations and **never** `scenario.ground_truth` — it is a *self-consistency* check, not an answer key. It
+  can be fooled by wrong-record retrieval (it would accept a self-consistent-but-wrong total); on this testbed
+  retrieval is always correct, so the residual it closes is **pure arithmetic slip** (all `140`s had fetched both
+  `140` and `18`). Stated on the figure. The re-prompt names the components (`140`, `18`) and the rule (add both)
+  but **not** the sum `158`, so the model still does the trivial addition itself — a *checker*, not a *solver*.
+- **The framing:** the gap is **natural** (the weak model's own failure on a clean task — no injection), and the
+  full ladder on this model is now **0% → 75% → 100%** (bare → +submit-nudge → +validation). The claim remains the
+  **capability × guardrail interaction**: a weak-but-tool-capable model needs guardrails GLM-4.6 (S6/S7) did not.
+- **Process win (cheap de-risk, again):** the ~N=8 pilot confirmed the mechanism fired and lifted before the full
+  spend; N=40 (not 20) was chosen up front because `stats.py` showed the ~25 pp residual is knife-edge at N=20
+  (a null if validation catches 4-of-5) but robust at N=40 — the binding constraint is the statistics, not the code.
+- **Reproduce:** `uv run validation_ablation.py mistralai/mistral-nemo 40` (live); `uv run test_validation.py` +
+  `uv run test_chart.py` (offline). All **twelve** offline suites green.

@@ -15,11 +15,12 @@ forge-gap/
 ├─ stats.py            # S4 Wilson + Newcombe confidence intervals
 ├─ ablation.py         # ablation harness: run_arms (N arms, S6) + run_ablation (2-arm legacy, S4), with CIs
 ├─ malformed_ablation.py # S6 three-arm malformed-call ablation: baseline / +error-recovery / +retry-nudge
-├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap + S8 weak-gap figures from saved numbers
+├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap + S8 weak-gap + S9 validation figures from saved numbers
 ├─ weak_ablation.py    # the S8 clean 3-arm ablation on a weak model (baseline / +retry-nudge / +submit-nudge)
+├─ validation_ablation.py # the S9 stacked 2-arm ablation on a weak model (submit-nudge reference / +validation)
 ├─ verify.py           # smoke test: plain chat + one tool-calling round-trip
-├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge, submit_nudge)
-├─ docs/figures/       # the committed gap-closure + malformed-gap + weak-gap charts (PNG) + their vendored data (JSON)
+├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge, submit_nudge, validation)
+├─ docs/figures/       # the committed gap-closure + malformed-gap + weak-gap + validation charts (PNG) + their vendored data (JSON)
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv + matplotlib)
@@ -189,6 +190,42 @@ uv run weak_ablation.py mistralai/mistral-nemo 20     # args: model, N runs (cle
 
 Offline, the guardrail is covered without API calls by `uv run test_submit_nudge.py` and the vendored figure
 data by `uv run test_chart.py`. The full reasoning is in `docs/DECISIONS.md` **D21**.
+
+## 10. Submitting *right*, not just submitting (S9 — the validation guardrail)
+
+S8 ended one guardrail short. Submit-nudge got mistral-nemo to *submit* — but ~25% of the time it submitted
+`140` (the item total, with **shipping silently forgotten**). No tool errored; the model just summed wrong.
+That's the **last** failure type the project hadn't closed — *wrong answer, no error* — and it's the first one
+that's **semantic**, not mechanical: none of the three earlier guardrails (which fire only on a tool *error* or
+a *missing* call) can even see it. S9 builds the fourth and final guardrail for it — **validation**.
+
+**The honest hard part: validate *without* the answer key.** When the model calls `submit_answer(value)`, the
+harness recomputes the total from **the data the model itself retrieved this run** (`get_order` → `140`,
+`get_ship_rate` → `18`) and, on a mismatch, re-prompts it to recompute (naming the parts `140` and `18`, but
+**not** the sum) and keeps looping. Crucially it reads **only the run's own tool results, never the oracle's
+`ground_truth`** — so it's a *self-consistency* check ("does your answer match the evidence you gathered?"), not
+an answer key. It can be *fooled* by a wrong-record retrieval (it would accept a self-consistent-but-wrong total;
+the oracle still fails it), so it doesn't trivially force a pass — it closes only the *arithmetic-slip* slice of
+the semantic gap, and the figure says so.
+
+![Validation closes the residual wrong-answer gap — submit-nudge 75% → +validation 100% on mistral-nemo](docs/figures/validation-gap.png)
+
+Because mistral-nemo's bare baseline is 0% (it never submits), there's nothing to validate until submit-nudge
+lifts it — so this is a **stacked** ablation: hold submit-nudge fixed, toggle validation. Pilot-gated (N=8:
+validation fired and lifted 75% → 100%), then the full run (mistral-nemo, N=40, temp 0.7): **submit-nudge
+(reference) 30/40 = 75%**, **+validation 40/40 = 100%**, gap **+25.0 pp**, Newcombe 95% CI **[+11.1%, +40.2%]** —
+clears 0, non-overlapping Wilson bars, a **real** result. Validation fired on **6/6** of the `140`s it ever saw
+(pilot + full) and converted every one to a genuine `158`. The full ladder on this model is now **0% → 75% →
+100%**, and every failure class now has its matched guardrail — transient→error-recovery, malformed→retry-nudge
+(null), no-submit→submit-nudge, **wrong-answer→validation** — the project's thesis, complete.
+
+```bash
+# needs your key in .env — real model calls (N×2 trials); regenerate the figure with `uv run chart.py`
+uv run validation_ablation.py mistralai/mistral-nemo 40   # args: model, N runs (clean task, stacked on submit-nudge)
+```
+
+Offline, the guardrail is covered without API calls by `uv run test_validation.py` and the vendored figure data
+by `uv run test_chart.py`. The full reasoning is in `docs/DECISIONS.md` **D22**.
 
 ## Architecture & State Management
 

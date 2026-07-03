@@ -98,7 +98,7 @@ def run_arms(
             "label": r["label"], "correct": r["correct"], "n": r["n"], "rate": r["rate"],
             "wilson": [lo, hi], "by_stop": r["by_stop"],
             "recoveries": r.get("recoveries", 0), "nudges": r.get("nudges", 0),
-            "submit_nudges": r.get("submit_nudges", 0),
+            "submit_nudges": r.get("submit_nudges", 0), "validations": r.get("validations", 0),
         }
         if i > 0:  # every non-baseline arm gets a Newcombe interval vs the shared baseline
             d, d_lo, d_hi = newcombe_diff(base["correct"], base["n"], r["correct"], r["n"])
@@ -208,6 +208,8 @@ def _report_arms(s: dict) -> None:
             extra += f"   (corrective nudges: {a['nudges']})"
         if a.get("submit_nudges"):
             extra += f"   (submit nudges: {a['submit_nudges']})"
+        if a.get("validations"):
+            extra += f"   (validations: {a['validations']})"
         print(f"  {a['label']:<16} {a['correct']:>3}/{a['n']:<3} = {_pct(a['rate']):>6}   "
               f"95% CI [{_pct(a['wilson'][0])}, {_pct(a['wilson'][1])}]{extra}")
     print("-" * 72)
