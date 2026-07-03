@@ -66,9 +66,10 @@ def make_capturing_chat(script):
     return fake_chat
 
 
-def _run(script, *, nudge: bool, seed: int = 1):
+def _run(script, *, nudge: bool, seed: int = 1, scen=None):
     """Drive agent.run over a fully-armed malformed scenario with a canned, capturing chat."""
-    scen = with_malformed_faults(ORDER_SCENARIO, rate=1.0, seed=seed)  # both tools armed
+    if scen is None:
+        scen = with_malformed_faults(ORDER_SCENARIO, rate=1.0, seed=seed)  # both tools armed
     fake = make_capturing_chat(script)
     saved = agent.chat
     agent.chat = fake
@@ -142,10 +143,51 @@ def test_uncorrected_model_still_fails() -> None:
     check("baseline spent 0 nudges", summary["nudges"] == 0)
 
 
+# S10 regression: llama-3.1-8b sometimes emits tool-call arguments as a JSON *array* — it parses,
+# but it isn't the kwargs object the tools take. Both scripts run the CLEAN scenario (no faults):
+# the malformed shape comes from the model, and the harness must survive it, not crash (D23).
+LIST_ARGS_LOOKUP_SCRIPT = [
+    [("get_order", ["ORD-204"])],               # array args -> malformed, dispatch refused
+    [("get_order", {"order_id": "ORD-204"})],   # model retries properly
+    [("get_ship_rate", {"zone": "WEST"})],
+    [("submit_answer", {"value": 158})],
+]
+
+LIST_ARGS_SUBMIT_SCRIPT = [
+    [("get_order", {"order_id": "ORD-204"})],
+    [("get_ship_rate", {"zone": "WEST"})],
+    [("submit_answer", [158])],                 # array args on the TERMINAL tool
+]
+
+
+def test_list_args_on_lookup_do_not_crash() -> None:
+    print("agent.run — JSON-array args on a lookup tool: malformed path, no crash")
+    summary, traj, _snaps = _run(LIST_ARGS_LOOKUP_SCRIPT, nudge=False, scen=ORDER_SCENARIO)
+    bad_acts = [r for r in traj if r["event"] == "act" and r["args_ok"] is False]
+    check("the array call is recorded args_ok=False", len(bad_acts) == 1)
+    check("dispatch was refused (not attempted)", bad_acts[0]["dispatch_ok"] is False)
+    observed = [r for r in traj if r["event"] == "observe" and r["ok"] is False]
+    check("the model observes a malformed-arguments error", len(observed) == 1
+          and "malformed" in observed[0]["result"].lower())
+    check("the run still completes once the model retries properly", summary["correct"] is True)
+
+
+def test_list_args_on_submit_do_not_crash() -> None:
+    print("agent.run — JSON-array args on submit_answer: submitted=None, no crash")
+    summary, traj, _snaps = _run(LIST_ARGS_SUBMIT_SCRIPT, nudge=False, scen=ORDER_SCENARIO)
+    check("run terminates as a submission", summary["stop"] == "submitted")
+    check("no value captured from array args (submitted None)", summary["final_answer"] is None)
+    check("graded wrong, not crashed", summary["correct"] is False)
+    submit_acts = [r for r in traj if r["event"] == "act" and r["tool"] == "submit_answer"]
+    check("the submit act is recorded args_ok=False", len(submit_acts) == 1
+          and submit_acts[0]["args_ok"] is False)
+
+
 def main() -> int:
     print("Offline tests: the S6 retry-nudge mechanism\n" + "-" * 43)
     for t in (test_nudge_message, test_nudge_reaches_model_and_counts,
-              test_baseline_appends_nothing, test_uncorrected_model_still_fails):
+              test_baseline_appends_nothing, test_uncorrected_model_still_fails,
+              test_list_args_on_lookup_do_not_crash, test_list_args_on_submit_do_not_crash):
         t()
         print()
     print("-" * 43)
