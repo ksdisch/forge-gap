@@ -43,6 +43,9 @@ class Scenario:
     registry: dict[str, Callable]     # tool name -> python callable
     final_tool: str                   # terminal tool the loop stops on
     ground_truth: float               # the correct answer, known in advance
+    validate: Callable | None = None  # S9 self-consistency check: (messages, submitted) ->
+                                      # (consistent, evidence_or_None). Reads only the run's
+                                      # tool results — never ground_truth. None = no check.
 
 
 # --- the records (a tiny fixed "database") --------------------------------
@@ -157,6 +160,48 @@ _order = ORDERS[TARGET_ORDER]
 GROUND_TRUTH = _order["item_total_usd"] + SHIP_RATES[_order["ship_zone"]]["rate_usd"]  # 140 + 18 = 158
 
 
+# --- S9 validation function: recompute from the model's own retrieved evidence ----------------
+# This is a SELF-CONSISTENCY check, not an answer check. It reads only the `messages` a run
+# produced — specifically the tool results for get_order and get_ship_rate — and recomputes the
+# total from those. It NEVER reads GROUND_TRUTH. That means it can be fooled by wrong-record
+# retrieval (the model fetched the wrong order → it returns the self-consistent-but-wrong total
+# and accepts it), but on this testbed retrieval is always correct, so all residual failures are
+# pure arithmetic slips — exactly what this catches. Bright lines (D22): (1) never reads
+# GROUND_TRUTH; (2) encoding "sum the retrieved line items" is narrow task knowledge, not the answer.
+def _validate_order_total(
+    messages: list[dict], submitted: float
+) -> tuple[bool, dict | None]:
+    """Recompute from tool results; return (consistent, evidence_or_None).
+
+    consistent=True + evidence=None  → either matches, OR can't recompute (accept).
+    consistent=False + evidence=dict → mismatch; evidence carries item_total_usd, rate_usd,
+                                       expected for the re-prompt (D22).
+    """
+    item_total: float | None = None
+    ship_rate: float | None = None
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        try:
+            data = json.loads(msg.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if "item_total_usd" in data and item_total is None:
+            item_total = float(data["item_total_usd"])
+        if "rate_usd" in data and ship_rate is None:
+            ship_rate = float(data["rate_usd"])
+    if item_total is None or ship_rate is None:
+        return True, None  # can't recompute — accept (no false negative from missing evidence)
+    try:
+        sub_num = float(submitted)
+    except (ValueError, TypeError):
+        return True, None  # non-numeric submission — not our target; the oracle fails it instead
+    expected = item_total + ship_rate
+    if abs(sub_num - expected) < 0.01:
+        return True, None
+    return False, {"item_total_usd": item_total, "rate_usd": ship_rate, "expected": expected}
+
+
 # --- the assembled scenario -----------------------------------------------
 # Note: submit_answer is deliberately NOT in `registry`. It's the terminal tool —
 # the loop intercepts it to capture GLM's answer and stop, so it's never dispatched.
@@ -168,4 +213,5 @@ ORDER_SCENARIO = Scenario(
     registry={"get_order": get_order, "get_ship_rate": get_ship_rate},
     final_tool="submit_answer",
     ground_truth=GROUND_TRUTH,
+    validate=_validate_order_total,
 )

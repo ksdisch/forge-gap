@@ -46,6 +46,10 @@ BASELINE_ARM = {"label": "baseline", "run_kwargs": {"recover": False}}
 RECOVERY_ARM = {"label": "error_recovery", "run_kwargs": {"recover": True}}
 NUDGE_ARM = {"label": "retry_nudge", "run_kwargs": {"nudge": True}}  # S6: the model-turn corrector
 SUBMIT_NUDGE_ARM = {"label": "submit_nudge", "run_kwargs": {"submit_nudge": True}}  # S8: prod a stalled run to submit
+# S9: STACKED on submit-nudge (submit_nudge=True stays on) — reject a submission inconsistent with the
+# model's own retrieved evidence and re-prompt. The reference for its gap is the submit_nudge arm, not
+# baseline, so the Newcombe delta isolates validation's INCREMENTAL lift (DECISIONS D22).
+VALIDATION_ARM = {"label": "validation", "run_kwargs": {"submit_nudge": True, "validate": True}}
 
 
 def run_arms(
