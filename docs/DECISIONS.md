@@ -840,3 +840,67 @@ the stacked ablation (both arms carry submit-nudge; validation is toggled on top
   (a null if validation catches 4-of-5) but robust at N=40 — the binding constraint is the statistics, not the code.
 - **Reproduce:** `uv run validation_ablation.py mistralai/mistral-nemo 40` (live); `uv run test_validation.py` +
   `uv run test_chart.py` (offline). All **twelve** offline suites green.
+
+---
+
+## D23 — S10 = the harder validation testbed (Option A): the *same* validation guardrail on Llama-3.1-8B's hallucination gap, UN-stacked ⭐ *(scope signed off 2026-07-03; this is the start-of-stage brief — the fit-pilot gates the full spend)*
+
+This is a **start-of-stage brief** (written before the code, per the per-stage rhythm). With the core thesis
+complete after S9 (four failure classes, four matched guardrails, each measured under the CI gate), anything
+from here is upside, not obligation — so the decision was *"what's the highest-value next measurement, or is
+it time to write up?"*
+
+### The choice (scope signed off 2026-07-03)
+Make S10 the **harder validation testbed** parked at S9 (ROADMAP "Parked", 2026-06-30): re-run the S9
+**validation** guardrail — unchanged — on **`meta-llama/llama-3.1-8b-instruct`**, whose natural failure on the
+clean task is *messier* than nemo's clean arithmetic slip: it **hallucinates** the final number even with the
+right data in hand (S8 fit-pilot: 0/8; submitted garbage like `1234.56`, `10.0`, and — twice — the literal
+formula string `"item_total_usd + ship_rate"`).
+
+- **Scope options weighed:** (A) **this** ✅ · (B) **capability ladder** — same guardrails across 2–3 models
+  for a lift-vs-capability curve (strong summary figure, pure reuse, but no new mechanism and the most live
+  spend; passed over once already at D22 as "more of the same") · (C) **true self-hosted endpoint**
+  (llama.cpp/Ollama — the original *Forge* framing; biggest infra lift + risk, and partly duplicates S4's
+  injected-transient result) · (D) **declare done + portfolio write-up** (fully legitimate — the thesis is
+  complete — but forgoes the one cheap novel measurement still on the table; remains available *after* A).
+- **Why (A):** it's the only path that produces a **genuinely new measurement** at low cost — it turns the
+  validator's *disclosed blind spot* (D22's honesty crux) from a caveat into a **number**. On nemo the
+  wrong-answer residual was 100% pure slip, so validation caught 6/6 — a best-case testbed. Llama's gap is a
+  messy mix: some failures are slips on correctly-retrieved evidence (validation-catchable) and some are
+  hallucination / missing-or-wrong retrieval (structurally **un-validatable** by a self-consistency check).
+  Measuring how much of a *messy natural* wrong-answer gap validation closes — and how much it structurally
+  can't — is the honest stress test of S9's result. Pilot-gated, so the downside is pennies.
+
+### What's NEW vs S9 (the design deltas — everything else is reuse)
+1. **UN-stacked ablation.** nemo never submitted, so S9 had to stack validation on submit-nudge to unmask the
+   gap. **Llama submits on its own** (garbage, but it calls the terminal tool — D21's pilot table), so the
+   S10 reference arm is the **bare baseline** and validation toggles directly:
+   `VALIDATION_ONLY_ARM = {"label": "validation_only", "run_kwargs": {"validate": True}}` (no `submit_nudge`).
+   A cleaner 2-arm design; nothing else in the harness changes.
+2. **The decomposition metric (the novel part).** Hand-read every miss and split the gap into:
+   **(i) validation-catchable** — retrieved both inputs, submitted an inconsistent number → the guardrail
+   fires; **(ii) un-validatable** — never retrieved the evidence (validator *accepts by design*: it returns
+   "can't recompute" rather than guess) or non-numeric submissions (validator passes them through; the oracle
+   fails them). Slice (ii) is D22's blind spot, now **measured** instead of merely disclosed — the figure
+   caption states both shares plainly.
+3. **Zero mechanism code.** `agent.run(validate=True)` and `Scenario.validate` (`_validate_order_total`) are
+   reused byte-for-byte — including its two accept-by-design rules (missing evidence → accept; non-numeric →
+   accept, oracle fails it), which are exactly what makes slice (ii) measurable. New code is only the arm
+   config, a thin `hallucination_ablation.py` runner (mirrors `validation_ablation.py`), and offline tests.
+
+### Pre-registered pilot rules (decided BEFORE the pilot, ~pennies)
+**Pilot: N=8 per arm (baseline / +validation), clean task, llama-3.1-8b, hand-read all trajectories.**
+- **Fires + lifts** → size the full N with `stats.py` from the pilot rates (the same knife-edge analysis as
+  D22 — the binding constraint is the statistics, not the code), then run the full ablation.
+- **Llama mostly *doesn't* submit** (contradicting the S8 pilot) → the no-submit gap is masking again;
+  consider a disclosed third arm (`submit_nudge + validate`) rather than pretending the 2-arm design fits.
+- **Validation never fires** (all misses are missing-evidence or non-numeric) → that is a **blind-spot-
+  dominant finding**: report the decomposition honestly; a null under the CI gate is still a real result.
+- **Fires but doesn't lift** (model resubmits the same wrong number) → the S6-shaped null; report it.
+
+### Honesty framing (unchanged from D22, restated for this testbed)
+The gap is **natural** (clean task, no injection). The validator stays a *self-consistency check, never an
+answer key* — the two bright lines (never reads `scenario.ground_truth`; re-prompt names components, not the
+sum) must survive code review unchanged. Expected headline: *"on a messy natural wrong-answer gap, validation
+recovered X pp; the remaining Y pp is un-validatable (bad/missing retrieval) — the blind spot, quantified."*
+X may be small or null; either way it's the measurement.
