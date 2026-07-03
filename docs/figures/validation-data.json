@@ -1,0 +1,52 @@
+{
+  "model": "mistralai/mistral-nemo",
+  "n": 40,
+  "fault_rate": 0.0,
+  "temperature": 0.7,
+  "fault_kind": "none",
+  "baseline_label": "submit_nudge",
+  "arms": [
+    {
+      "label": "submit_nudge",
+      "correct": 30,
+      "n": 40,
+      "rate": 0.75,
+      "wilson": [
+        0.598057409330299,
+        0.8581303210445048
+      ],
+      "by_stop": {
+        "submitted": 40
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 31,
+      "validations": 0
+    },
+    {
+      "label": "validation",
+      "correct": 40,
+      "n": 40,
+      "rate": 1.0,
+      "wilson": [
+        0.9123754607496077,
+        1.0
+      ],
+      "by_stop": {
+        "submitted": 40
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 35,
+      "validations": 5,
+      "gap_vs_baseline": {
+        "delta": 0.25,
+        "newcombe": [
+          0.11082303995261567,
+          0.40194259066970095
+        ],
+        "excludes_zero": true
+      }
+    }
+  ]
+}

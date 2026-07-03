@@ -19,16 +19,17 @@ flowchart TB
     S6["S6 · Retry-nudge + malformed fault<br/>measured NULL — GLM self-corrects"]:::done
     S7["S7 · Natural-gap hunt · D12<br/>hardened task — GLM aces 8/8, no natural gap"]:::done
     S8["S8 · Weak-model natural gap · D21<br/>submit-nudge: 0% → 75% = +75pp ✓ (mistral-nemo)"]:::done
-    F["S9–S12 · planned<br/>validation guardrail / more models"]:::planned
+    S9["S9 · Validation guardrail · D22<br/>stacked: 75% → 100% = +25pp ✓ (mistral-nemo)"]:::done
+    F["S10–S12 · planned<br/>more models / fault types"]:::planned
 
-    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> F
+    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9 --> F
 
     classDef done fill:#2a9d8f,stroke:#1d6f66,color:#ffffff;
     classDef goal fill:#e9c46a,stroke:#b8902f,color:#222222,stroke-width:2px;
     classDef planned fill:#eeeeee,stroke:#9e9e9e,color:#555555;
 ```
 
-**Legend:** 🟩 shipped (S0–S8) · ⬜ planned (S9–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls), **S7 = no natural gap** (a strong model doesn't break on its own — injected faults are required), **S8 = +75 pp ✓** (a *weak* model's natural no-submit gap, closed by a matched submit-nudge while retry-nudge nulls). The detailed table below is the source of truth; this map is its at-a-glance view.
+**Legend:** 🟩 shipped (S0–S9) · ⬜ planned (S10–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls), **S7 = no natural gap** (a strong model doesn't break on its own — injected faults are required), **S8 = +75 pp ✓** (a *weak* model's natural no-submit gap, closed by a matched submit-nudge while retry-nudge nulls), **S9 = +25 pp ✓** (a *validation* guardrail, stacked on submit-nudge, closes the residual wrong-answer gap — completing the "each failure → its matched guardrail" thesis: 0% → 75% → 100% on mistral-nemo). The detailed table below is the source of truth; this map is its at-a-glance view.
 
 | Stage | What it does (plain English) | Why it exists | Status |
 |-------|------------------------------|---------------|--------|
@@ -41,7 +42,8 @@ flowchart TB
 | **S6** | Add the **second guardrail (retry-nudge)** + the **malformed-call** fault it targets, and run a 3-arm ablation (baseline / +error-recovery / +retry-nudge) on that testbed. **Result: a measured NULL** — GLM self-corrects malformed calls unaided, so no guardrail beats the baseline. | Tests *where a guardrail helps* — and finds the boundary: only where the model can't self-correct. | ✅ done |
 | **S7** | The **natural-gap hunt** (D12): drop injected faults and *harden the task itself* (a 4–5 lookup chain through ~25 confusable records, named by description so the model must disambiguate) until GLM fails on its own. Pilot-gated, with a bounded escalation. **Result: GLM aced it 8/8 (v1) and 8/8 (v2) — no natural gap.** | Tests the headline goal: does a strong model break on its own merits? It doesn't — so injected faults are the honest way to study guardrails here. | ✅ done — **no natural gap** (4th robustness signal) |
 | **S8** | The **weak-model natural-gap** experiment: hold the task fixed and CLEAN, swap GLM-4.6 for a weaker model (`mistral-nemo`), and ablate a NEW **submit-nudge** guardrail (re-prompt a run that stalled without submitting). Pilot-gated; pivoted here after two weak models exposed *non-tool-error* failures. | Tests the **capability × guardrail interaction**: a weak-but-tool-capable model needs a guardrail GLM-4.6 didn't. | ✅ done — **measured**: 0% → 75%, **+75 pp** (Newcombe [+47.8, +88.8]); retry-nudge a null in the same run |
-| **S9–S12** | Layer any **further guardrails** (e.g. the parked **validation** guardrail) / fault types / models. | How much *each* guardrail closes the gap. | ⬜ planned |
+| **S9** | The **validation guardrail** (D22): stack a *self-consistency* check on submit-nudge — recompute the total from the model's OWN retrieved data (never the answer key) and re-prompt a mismatch — and measure its incremental lift on mistral-nemo's residual wrong-answer (`140`, shipping forgotten) misses. | Closes the **last** failure row — *wrong-answer, no error* — that error-recovery / retry-nudge / submit-nudge structurally can't see, **completing** the matched-guardrail thesis. | ✅ done — **measured**: 75% → 100%, **+25 pp** (Newcombe [+11.1, +40.2]); validation fired **6/6** genuine `140→158` corrections |
+| **S10–S12** | Layer any **further** fault types / models (e.g. the parked Llama-8B hallucination validation gap). | How much *each* guardrail closes the gap. | ⬜ planned |
 
 *(forge-gap runs **S0 → ~S12**; the gap-closure chart now exists at **S5**, and **S6–S12** layer the remaining mechanisms one at a time and extend it — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
 
@@ -140,16 +142,40 @@ project's first *natural* (un-injected) gap-closure, and it shows **guardrail sp
 the wrong guardrail does nothing, the matched one lifts. The residual (5/20 submit `140`, shipping forgotten) is
 a *validation* gap submit-nudge can't touch — **parked** as a separate experiment (below). Choices + the measured
 result are DECISIONS **D21**; figure `docs/figures/weak-gap.png` (README §9). All **eleven** offline suites green.
-**Next (S9+):** the parked validation guardrail; optionally a capability ladder (more models).
+**Next (S9+):** the validation guardrail (built next); optionally a capability ladder (more models).
 
-**Parked — a future experiment (Kyle's call, 2026-06-30).** The S8 fit pilot found that a weak
-tool-capable model (**Llama-3.1-8B**) fails the base task **~100%** on the *clean* task by submitting a
-**hallucinated final number even when it retrieved the right data** (twice it submitted the literal
-formula string `"item_total_usd + ship_rate"`). That is concrete evidence of the **validation gap** D20/S7
-flagged — *wrong-answer, no tool error*, invisible to both error-recovery and retry-nudge. Parked as a
-**separate research task**: build a **validation / critic guardrail** (recompute the total from the
-retrieved fields; reject a submission that doesn't match) and measure its lift on the Llama-8B testbed.
-Distinct from S8 proper, which ladders the *model* up to hunt a *mechanical* natural gap.
+**S9 done — the validation guardrail closes the residual wrong-answer gap (+25 pp), completing the thesis.**
+S8 left a residual: behind submit-nudge, mistral-nemo still submitted `140` (item total, shipping forgotten) in
+~25% of runs — a *wrong-answer, no error* miss (D20 **row 3**) that submit-nudge structurally can't touch. S9
+builds the **fourth and final guardrail — validation**: when the model calls `submit_answer`, recompute the total
+from the model's **OWN retrieved tool results** (never the oracle's `ground_truth`) and, on a mismatch, re-prompt
+it to recompute (naming the components, not the sum) and continue. A hand-read of all 20 S8 submit-nudge
+trajectories first proved the residual is the *cleanest possible* target — all 5 wrong `140`s had retrieved **both**
+inputs (`140` and `18`) and just failed to add, so a self-consistency check catches every one. Because the bare
+baseline is 0% (never submits), the validation gap is *masked* until submit-nudge lifts it — so this is a **stacked**
+ablation: hold submit-nudge fixed, toggle validation. Pilot-gated (N=8, validation fired and lifted 75%→100%), then
+the full run on **mistral-nemo, N=40**: **submit-nudge (reference) 30/40 = 75% · +validation 40/40 = 100%**, gap
+**+25.0 pp, Newcombe [+11.1, +40.2]** — clears 0, non-overlapping Wilson bars, a **real** result. Validation fired on
+**6/6** of the `140`s it ever saw (pilot + full) and converted every one to a genuine `158`. The full ladder on this
+model is now **0% → 75% → 100%**. Every failure class now has its matched guardrail (transient→recovery +32.5,
+malformed→nudge null, no-submit→submit-nudge +75, **wrong-answer→validation +25**), and **guardrail specificity**
+holds a fourth time. Choices + measured result are DECISIONS **D22**; figure `docs/figures/validation-gap.png`
+(README §10). All **twelve** offline suites green. **Next (S10+):** optional — more models / fault types.
+
+**Honesty crux (load-bearing):** validation is a *self-consistency* check, **not** an answer key. It reads only
+the run's tool observations, never `scenario.ground_truth`, so it can be fooled by *wrong-record* retrieval (it
+would accept a self-consistent-but-wrong total — the oracle still fails it). On this testbed retrieval is always
+correct, so the residual it closes is **pure arithmetic slip**; the figure states this plainly. That structural
+blind spot is exactly what keeps it honest — it measures how much of the wrong-answer gap was *slip* vs *bad
+retrieval*, not a forced 100%.
+
+**Parked — a remaining future experiment (Kyle's call, 2026-06-30).** S9 closed the *arithmetic-slip* layer of the
+validation gap on mistral-nemo (retrieved-right, summed-wrong). A **harder** validation case remains for a future
+stage: **Llama-3.1-8B** fails the clean task ~100% by submitting a **hallucinated** final number even when it
+retrieved the right data (twice, the literal formula string `"item_total_usd + ship_rate"`). That is a noisier
+wrong-answer testbed — the *same* validation guardrail would apply, but its lift there (and how much of Llama's gap
+is bad *retrieval* the self-consistency check can't catch) is a distinct measurement. Parked as a separate research
+task; distinct from S8/S9, which used the cleaner mistral-nemo testbed.
 
 > **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
 > natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say

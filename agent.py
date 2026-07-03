@@ -146,6 +146,30 @@ def _submit_nudge_message() -> str:
     )
 
 
+# --- validation: the S9 mechanism (reject a submission inconsistent with the evidence) ------
+def _fmt_num(x) -> str:
+    """Render a number without a trailing '.0' (140.0 -> '140') for clean re-prompts."""
+    try:
+        f = float(x)
+    except (ValueError, TypeError):
+        return str(x)
+    return str(int(f)) if f == int(f) else str(f)
+
+
+def _validation_nudge_message(submitted, evidence: dict) -> str:
+    """Build validation's re-prompt: the submitted value is inconsistent with the data the model
+    ITSELF retrieved. Name the components (item total + shipping) and the rule (add BOTH), but do
+    NOT state the recomputed sum — the model must still do the (trivial, by-design) addition itself,
+    so the guardrail stays a consistency CHECKER, not a SOLVER (DECISIONS D22)."""
+    item = _fmt_num(evidence["item_total_usd"])
+    rate = _fmt_num(evidence["rate_usd"])
+    return (
+        f"You submitted {_fmt_num(submitted)}, but that does not match the data you retrieved. "
+        f"The grand total must add BOTH the item total ({item}) AND the shipping rate ({rate}). "
+        "Recompute the sum and call submit_answer again with the corrected total."
+    )
+
+
 # --- the loop -------------------------------------------------------------
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -161,6 +185,7 @@ def run(
     max_recoveries: int = MAX_RECOVERIES,
     nudge: bool = False,
     submit_nudge: bool = False,
+    validate: bool = False,
     out_path: str = TRAJECTORY_PATH,
 ) -> dict:
     """Run one reason->act->observe loop to completion, then grade it.
@@ -188,10 +213,22 @@ def run(
     do it now") and the loop continues, instead of ending as `no_submit`. Unlike retry-nudge (which fires on
     a *failed* call), submit-nudge fires on a *missing terminal* call — the natural failure of a model that
     computes the answer but never emits the terminal tool (DECISIONS D21). `submit_nudge=False` is the bare
-    baseline (a no-call turn ends the run). These mechanism toggles are independent arms; any combination, or none.
+    baseline (a no-call turn ends the run).
 
-    Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and how
-    many harness-level recoveries and corrective nudges fired); writes the full trajectory to `out_path`.
+    `validate` toggles the S9 **validation** mechanism: when True, a `submit_answer` call is checked for
+    *self-consistency* before being accepted — `scenario.validate` recomputes the total from the model's OWN
+    retrieved tool results (never the oracle's `ground_truth`) and, if the submitted value doesn't match, the
+    harness re-prompts the model to recompute (naming the components, not the sum) and continues, instead of
+    accepting the wrong number. Unlike submit-nudge (a *missing* terminal call) or retry-nudge (a *failed*
+    call), validation fires on a *submitted-but-inconsistent* answer — the wrong-answer-no-error failure the
+    other guardrails structurally can't see (DECISIONS D22). It is a self-consistency check, NOT an answer key:
+    it can be fooled by wrong-record retrieval, so it does not trivially force a pass. `validate=False` is the
+    bare baseline (any submission is accepted as final). These mechanism toggles are independent arms; any
+    combination, or none.
+
+    Returns a small summary dict (the oracle's correct/submitted/expected, the model used, and how many
+    harness-level recoveries, corrective nudges, submit-nudges, and validations fired); writes the full
+    trajectory to `out_path`.
     """
     resolved_model = model or MODEL
     messages = [
@@ -207,7 +244,7 @@ def run(
         "event": "run", "ts": _now(), "model": resolved_model, "scenario": scenario.name,
         "temperature": temperature, "max_steps": max_steps, "max_tokens": MAX_TOKENS,
         "recover": recover, "max_recoveries": max_recoveries, "nudge": nudge,
-        "submit_nudge": submit_nudge,
+        "submit_nudge": submit_nudge, "validate": validate,
         "task": scenario.task,
         "ground_truth": scenario.ground_truth,
     })
@@ -219,6 +256,7 @@ def run(
     total_recoveries = 0      # harness-level retries the error-recovery arm absorbed this run
     total_nudges = 0          # corrective re-prompts the retry-nudge arm issued this run
     total_submit_nudges = 0   # submit-nudge re-prompts issued this run (the S8 arm)
+    total_validations = 0     # validation re-prompts issued this run (the S9 arm)
 
     for step in range(max_steps):
         resp = chat(messages, model=resolved_model, tools=scenario.tools,
@@ -293,6 +331,31 @@ def run(
                     "tool": c.function.name, "args": args,
                     "args_ok": args_ok, "dispatch_ok": True,
                 })
+                # S9 validation — before accepting the submission as final, recompute the total from
+                # the model's OWN retrieved evidence (scenario.validate; NEVER ground_truth). If the
+                # value is inconsistent with that evidence, don't accept it: thread a tool result for
+                # this submit call (so the API's tool-call pairing stays valid), append ONE corrective
+                # re-prompt, count a validation, and continue the loop. Spends a model turn (like
+                # retry-nudge / submit-nudge) but fires on a submitted-but-inconsistent answer, not a
+                # failed or missing call (DECISIONS D22). A no-op unless validate=True and there's room
+                # (a final-step submission is accepted as-is — no turn left to re-prompt into).
+                if (validate and scenario.validate is not None and submitted is not None
+                        and step < max_steps - 1):
+                    consistent, evidence = scenario.validate(messages, submitted)
+                    if not consistent:
+                        messages.append({
+                            "role": "tool", "tool_call_id": c.id,
+                            "content": f"Submission {submitted} recorded but flagged for review.",
+                        })
+                        messages.append({
+                            "role": "user",
+                            "content": _validation_nudge_message(submitted, evidence),
+                        })
+                        total_validations += 1
+                        log({"event": "validation", "step": step, "count": total_validations,
+                             "submitted": submitted, "evidence": evidence})
+                        submitted = None  # rejected — this wasn't the final answer; keep looping
+                        break
                 stop, final_answer, terminated = "submitted", submitted, True
                 break
 
@@ -335,7 +398,7 @@ def run(
     correct, detail = grade(submitted, scenario.ground_truth)
     log({"event": "final", "step": step, "stop": stop, "answer": final_answer,
          "recoveries": total_recoveries, "nudges": total_nudges,
-         "submit_nudges": total_submit_nudges})
+         "submit_nudges": total_submit_nudges, "validations": total_validations})
     log({
         "event": "grade", "submitted": submitted, "expected": scenario.ground_truth,
         "correct": correct, "reason": detail["reason"], "stop": stop,
@@ -360,6 +423,8 @@ def run(
         "nudges": total_nudges,
         "submit_nudge": submit_nudge,
         "submit_nudges": total_submit_nudges,
+        "validate": validate,
+        "validations": total_validations,
         "tokens": {"prompt": prompt_tokens, "completion": completion_tokens},
         "trajectory": out_path,
         "records": len(records),

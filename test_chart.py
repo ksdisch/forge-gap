@@ -19,6 +19,7 @@ import sys
 
 from chart import (
     MULTI_DATA_PATH,
+    VALIDATION_DATA_PATH,
     WEAK_DATA_PATH,
     bar_label,
     caption,
@@ -32,6 +33,8 @@ from chart import (
     pct,
     signed_pp,
     submit_nudges_spent,
+    validation_caption,
+    validations_spent,
     weak_caption,
     wilson_yerr,
 )
@@ -212,6 +215,39 @@ def test_vendored_weak_matches() -> None:
     check("submit_nudge delta == 0.75", close(s["arms"][2]["gap_vs_baseline"]["delta"], 0.75))
 
 
+# --- S9: the STACKED validation figure's pure helpers + vendored data ---
+def test_validations_spent_and_validation_caption() -> None:
+    print("validations_spent / validation_caption — honesty disclosure for the STACKED figure")
+    s = load_summary(VALIDATION_DATA_PATH)
+    check("validations_spent reads the validation arm (5)", validations_spent(s) == 5)
+    cap = validation_caption(s)
+    for piece in ("N=40", "CLEAN task", "temp 0.7", "mistralai/mistral-nemo", "NATURAL",
+                  "self-consistency, not the answer key"):
+        check(f"validation caption mentions '{piece}'", piece in cap)
+    check("validation caption never claims the gap is INJECTED (it's natural)", "INJECTED" not in cap)
+    check("validation caption shows the full ladder to 100%", "100% +validation" in cap)
+
+
+def test_vendored_validation_matches() -> None:
+    print("vendored validation data — the exact S9 stacked result (the figure's source of truth)")
+    s = load_summary(VALIDATION_DATA_PATH)
+    check("model == mistralai/mistral-nemo", s["model"] == "mistralai/mistral-nemo")
+    check("N == 40", s["n"] == 40)
+    check("fault_kind == none (clean, no injection)", s["fault_kind"] == "none")
+    check("reference arm is submit_nudge (the stacked layer)", s["baseline_label"] == "submit_nudge")
+    check("two arms, in order",
+          [a["label"] for a in s["arms"]] == ["submit_nudge", "validation"])
+    check("submit_nudge reference 30/40 = 75%",
+          s["arms"][0]["correct"] == 30 and close(s["arms"][0]["rate"], 0.75))
+    check("validation 40/40 = 100%",
+          s["arms"][1]["correct"] == 40 and s["arms"][1]["rate"] == 1.0)
+    check("validation fired 5 re-prompts (the mechanism DID work)", s["arms"][1]["validations"] == 5)
+    check("validation gap clears 0 -> a real result",
+          s["arms"][1]["gap_vs_baseline"]["excludes_zero"] is True)
+    check("validation delta == 0.25 (the incremental lift)",
+          close(s["arms"][1]["gap_vs_baseline"]["delta"], 0.25))
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -227,6 +263,8 @@ def main() -> int:
         test_vendored_malformed_matches,
         test_submit_nudges_spent_and_weak_caption,
         test_vendored_weak_matches,
+        test_validations_spent_and_validation_caption,
+        test_vendored_validation_matches,
     ):
         t()
         print()
