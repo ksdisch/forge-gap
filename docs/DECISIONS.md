@@ -904,3 +904,51 @@ answer key* — the two bright lines (never reads `scenario.ground_truth`; re-pr
 sum) must survive code review unchanged. Expected headline: *"on a messy natural wrong-answer gap, validation
 recovered X pp; the remaining Y pp is un-validatable (bad/missing retrieval) — the blind spot, quantified."*
 X may be small or null; either way it's the measurement.
+
+### Measured result (S10): validation recovers the checkable slice of a messy gap (+45 pp, REAL) — and the blind spot is now a number ⭐
+Every pre-registered rule fired as written. On the **clean** task, **llama-3.1-8b**, temp 0.7:
+
+- **The pilot (N=8/arm)** lifted 0/8 → 3/8 with 3 validation fires (2 converted to genuine `158`s, 1 **fooled**
+  — the run fetched the wrong zone's rate `12` and validation accepted the self-consistent `152`: the exact D22
+  fooling scenario, observed live for the first time). Rule 1 ("fires + lifts") → size N and run.
+- **Sizing (`stats.py`, before spending):** N=20 is knife-edge — baseline 1/20 with validation at 25% goes
+  **null** [−3.2%, +42.3%]; N=40 clears zero across the plausible envelope (even baseline 2/40 vs 20–37.5%).
+  → **N=40.**
+- **A latent harness bug, exposed and fixed mid-stage (disclosed):** the first N=40 attempt crashed at trial 13 —
+  llama sometimes emits tool-call arguments as a JSON **array** (`["ORD-204"]`), which *parses* but isn't the
+  kwargs object a tool takes; `agent.py` conflated "JSON parsed" with "arguments OK" and the terminal path did
+  `args.get(...)` on a list. Root-caused offline (two regression tests reproduce both symptoms), fixed with
+  `args_ok = isinstance(args, dict)` — non-object args now take the **existing** malformed-arguments path
+  (honest error observed by the model; a malformed submit records `submitted=None`). The fix adds **no help**
+  (routing through the pre-existing path, same as unparseable JSON) — the pilot ran pre-fix, the full run
+  post-fix; the only behavioural change is that the harness survives instead of crashing.
+
+**The full run (N=40, clean, un-stacked):**
+
+| Arm | Completion | Wilson 95% CI | Gap vs baseline (Newcombe 95% CI) | Verdict |
+| --- | --- | --- | --- | --- |
+| baseline | 0/40 = 0.0% | [0.0%, 8.8%] | — | llama's natural gap is total; 22/40 had both correct inputs in hand |
+| **+validation (un-stacked)** | **18/40 = 45.0%** | **[30.7%, 60.2%]** | **+45.0 pp [+28.2, +60.2]** | **REAL — clears 0** (fired **20**; 17/18 wins are fired-and-corrected) |
+
+**The decomposition (the stage's novel deliverable — a hand-read of every validation-arm miss):**
+
+| Residual slice | Share | Why validation structurally can't touch it |
+| --- | --- | --- |
+| never retrieved the rate | **35%** (14/40) | nothing to recompute from — accept-by-design (no guessing) |
+| wrong-record retrieval | **10%** (4/40) | self-consistent `152` = `140 +` the wrong zone's `12` — the validator **fooled**, the oracle still fails it |
+| non-numeric submission | **7.5%** (3/40) | formula strings / junk pass through; the oracle fails them |
+| never submitted | **2.5%** (1/40) | nothing to validate |
+
+- **The headline, exactly as pre-registered:** *validation recovered +45 pp — the self-consistency-violating
+  slice — and the 55 pp residual is un-validatable, decomposed above.* Read with S9 (same guardrail, 100% on
+  nemo's clean-slip gap), the pair **brackets the mechanism**: validation fixes *consistency* failures, never
+  *evidence* failures. S9 alone would over-sell the check; S10 calibrates it.
+- **One disclosed nuance (first-evidence anchoring):** `scenario.validate` recomputes from the *first* retrieved
+  value of each field, so one run that fetched `12` first and `18` later was still checked against the
+  wrong-evidence total (counted in the 10% row). A design property of the S9 validator left unchanged
+  mid-experiment, stated rather than patched.
+- **Bright lines re-verified:** the validator read only the run's own tool observations (never
+  `scenario.ground_truth`); the re-prompt named components, never the sum. The three `152` acceptances are the
+  *proof* the check isn't an answer key — an answer key could not be fooled.
+- **Reproduce:** `uv run hallucination_ablation.py meta-llama/llama-3.1-8b-instruct 40` (live, ~pennies);
+  `uv run test_nudge.py` + `uv run test_chart.py` (offline). All **twelve** offline suites green.

@@ -227,6 +227,41 @@ uv run validation_ablation.py mistralai/mistral-nemo 40   # args: model, N runs 
 Offline, the guardrail is covered without API calls by `uv run test_validation.py` and the vendored figure data
 by `uv run test_chart.py`. The full reasoning is in `docs/DECISIONS.md` **D22**.
 
+## 11. The blind spot, measured (S10 — the same guardrail on a *messy* gap)
+
+S9 measured validation on its **best case**: mistral-nemo's wrong answers were pure arithmetic slips on
+correctly-retrieved data, so the check caught every one (100%). S10 is the stress test: the **same guardrail,
+byte-for-byte**, on **llama-3.1-8b** — whose natural failure on the clean task is **hallucination** (it submits
+made-up numbers like `1234.56`, even the literal formula string `"item_total_usd + ship_rate"`). Unlike nemo,
+llama *does* submit unaided, so nothing masks the gap and the ablation is **un-stacked**: bare baseline vs
++validation, nothing underneath.
+
+![Validation recovers the checkable half of llama-8b's wrong-answer gap — 0% → 45%](docs/figures/hallucination-gap.png)
+
+Pilot-gated (N=8: fired 3×, lifted 0/8 → 3/8 — and *caught the validator being fooled live*: one run fetched the
+wrong zone's rate `12` and validation accepted the self-consistent-but-wrong `152`), then the full run
+(llama-3.1-8b, N=40, temp 0.7, clean): **baseline 0/40 = 0%**, **+validation 18/40 = 45%**, gap **+45.0 pp**,
+Newcombe 95% CI **[+28.2%, +60.2%]** — clears 0, non-overlapping Wilson bars, a **real** result. Validation fired
+20×, and 17 of the 18 wins were genuine fired-and-corrected runs.
+
+The stage's real deliverable is the **decomposition** — every miss hand-read and classified. The 55% validation
+did *not* recover is the check's structural blind spot, now a number instead of a caveat: **35%** never retrieved
+the shipping rate (nothing to recompute from — the validator accepts by design rather than guess), **10%**
+wrong-record retrieval (self-consistent `152`s the validator *must* accept and the oracle still fails — the proof
+it's a consistency check, not an answer key), **7.5%** non-numeric submissions, **2.5%** no-submit. Read together,
+S9 and S10 bracket the mechanism: **validation fixes *consistency* failures, never *evidence* failures.** Along
+the way llama exposed a latent harness bug — it sometimes emits tool arguments as a JSON *array*, which parses
+but isn't a callable argument object — fixed at the parse with regression tests, adding no help (the model's
+malformed call stays its failure; it just no longer crashes ours).
+
+```bash
+# needs your key in .env — real model calls (N×2 trials); regenerate the figure with `uv run chart.py`
+uv run hallucination_ablation.py meta-llama/llama-3.1-8b-instruct 40   # args: model, N runs (clean, un-stacked)
+```
+
+Offline: `uv run test_nudge.py` (the args-shape regressions) and `uv run test_chart.py` (the vendored figure
+data). The full reasoning is in `docs/DECISIONS.md` **D23**.
+
 ## Architecture & State Management
 
 To isolate and measure the guardrail deltas accurately without cross-contamination, the evaluation harness is built with strict boundaries around concurrency and state:
@@ -240,9 +275,9 @@ To isolate and measure the guardrail deltas accurately without cross-contaminati
 
 This project is a controlled testbed built to quantify mechanical agent failures. As a result, it has known boundaries:
 
-* **The Semantic Blind Spot (now partly closed):** The first three guardrails fire only on *typed* failures — a tool **error** (HTTP 503 / 400) or a **missing** terminal call — so they can't see a wrong answer that raises no exception. **S9's validation guardrail closes part of that gap:** it recomputes the total from the data the model itself retrieved and rejects a mismatch (a *self-consistency* check, not an answer key). What stays blind is the harder slice — a **wrong retrieval** (a self-consistent *but wrong* answer) or a hallucination with no supporting evidence — which a self-consistency check structurally cannot catch.
+* **The Semantic Blind Spot (now partly closed — and measured):** The first three guardrails fire only on *typed* failures — a tool **error** (HTTP 503 / 400) or a **missing** terminal call — so they can't see a wrong answer that raises no exception. **S9's validation guardrail closes part of that gap:** it recomputes the total from the data the model itself retrieved and rejects a mismatch (a *self-consistency* check, not an answer key). What stays blind is the harder slice — a **wrong retrieval** (a self-consistent *but wrong* answer) or a hallucination with no supporting evidence — which a self-consistency check structurally cannot catch. **S10 measured that blind spot** on llama-8b's messy natural gap: validation recovered **+45 pp** (the consistency-violating slice) while **55%** of the gap stayed un-validatable — 35% never-retrieved evidence, 10% wrong-record retrieval that *fooled* the validator, 7.5% non-numeric, 2.5% no-submit.
 * **The "Natural" gap needed a weaker model:** Frontier-grade GLM-4.6 proved robust enough that a *natural* gap never appeared (20/20 clean, self-heals malformed calls, 8/8 on a hardened task), so its guardrails had to be measured against **injected** faults (S3–S6), disclosed as such. Holding the task fixed and swapping in a **weaker** model (mistral-nemo, S8–S9) surfaced two real *natural* failures — never submitting (**+75 pp** from submit-nudge) and submitting a wrong total (**+25 pp** from validation) — the project's first un-injected gap-closures.
-* **Next steps (optional — the core deliverable is complete):** (a) a **harder validation testbed** — Llama-3.1-8B *hallucinates* wrong numbers, a noisier wrong-answer gap than nemo's clean arithmetic slip, to measure how much of its gap is bad *retrieval* the self-consistency check can't reach; (b) a **capability ladder** — the same guardrails across 2–3 models for a lift-vs-capability curve; (c) a genuinely **self-hosted** local model (the original *Forge* framing) to recover an infrastructure-level gap directly rather than by injection.
+* **Next steps (optional — the core deliverable is complete, and the S10 stress test is done):** (a) a **capability ladder** — the same guardrails across 2–3 models for a lift-vs-capability curve; (b) a genuinely **self-hosted** local model (the original *Forge* framing) to recover an infrastructure-level gap directly rather than by injection; (c) **declare done** and polish the write-up — with S10 the guardrail story is bracketed at both ends (best-case 100%, messy-case 45% + a quantified blind spot), a legitimate stopping point.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
