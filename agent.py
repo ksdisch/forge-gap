@@ -314,12 +314,15 @@ def run(
         terminated = False
         turn_failures: list[tuple[str, str]] = []  # non-terminal calls that failed this turn
         for c in calls:
-            # Parse the args. Malformed JSON is a REASON-phase mechanical failure.
+            # Parse the args. Malformed JSON is a REASON-phase mechanical failure — and so is
+            # valid JSON that isn't an object (llama-8b emits arrays; **args needs a mapping).
             try:
                 args = json.loads(c.function.arguments)
-                args_ok = True
+                args_ok = isinstance(args, dict)
             except json.JSONDecodeError:
                 args, args_ok = {}, False
+            if not args_ok:
+                args = {}
 
             # The terminal tool: capture GLM's final answer and stop. Never dispatched —
             # "submitting" can't fail mechanically, so dispatch_ok is trivially True; whether

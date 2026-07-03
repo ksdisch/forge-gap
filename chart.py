@@ -35,6 +35,10 @@ WEAK_OUT_PATH = os.path.join("docs", "figures", "weak-gap.png")
 VALIDATION_DATA_PATH = os.path.join("docs", "figures", "validation-data.json")
 VALIDATION_OUT_PATH = os.path.join("docs", "figures", "validation-gap.png")
 
+# S10: the UN-stacked hallucination figure (bare baseline vs +validation, CLEAN task, llama-3.1-8b).
+HALLUCINATION_DATA_PATH = os.path.join("docs", "figures", "hallucination-gap-data.json")
+HALLUCINATION_OUT_PATH = os.path.join("docs", "figures", "hallucination-gap.png")
+
 # Palette: muted gray for the no-help baseline, positive teal for a mechanism that really lifts,
 # neutral steel for a mechanism whose gap straddles 0 (a null — colour follows the measured verdict,
 # never the hoped-for one, so the figure can't over-claim).
@@ -182,6 +186,21 @@ def validation_caption(s: dict) -> str:
         f"N={s['n']} runs  ·  CLEAN task, NO fault injection  ·  temp {s['temperature']}  ·  {s['model']}\n"
         f"NATURAL gap · ladder 0% (S8 bare) → 75% +submit-nudge → 100% +validation  ·  "
         f"validation recomputes from the model's OWN retrieved data (self-consistency, not the answer key)"
+    )
+
+
+# --- S10: pure helper for the UN-stacked hallucination figure -----------------
+
+def hallucination_caption(s: dict) -> str:
+    """Honesty caption for the S10 hallucination figure. The gap is NATURAL (no injection) and UN-stacked:
+    llama-8b submits unaided (garbage), so the reference is the bare baseline. Validation recovers only the
+    self-consistency-violating slice; the residual is the check's structural blind spot — measured by a
+    hand-read of every miss (D23), stated on the figure so a 45% bar can't read as 'validation fixes llama'."""
+    return (
+        f"N={s['n']} runs  ·  CLEAN task, NO fault injection  ·  temp {s['temperature']}  ·  {s['model']}\n"
+        f"NATURAL gap, UN-stacked · the 55% residual is UN-VALIDATABLE (hand-read): "
+        f"35% never-retrieved evidence · 10% wrong-record (validator fooled — self-consistent) · "
+        f"7.5% non-numeric · 2.5% no-submit"
     )
 
 
@@ -391,6 +410,29 @@ def main() -> int:
             })
         print(f"wrote {vout}")
         for a in vs["arms"]:
+            tail = ""
+            if "gap_vs_baseline" in a:
+                gg = a["gap_vs_baseline"]
+                v = "REAL" if gg["excludes_zero"] else "null"
+                tail = f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}"
+            print(f"  {a['label']:<16} {pct(a['rate'])} ({a['correct']}/{a['n']}){tail}")
+
+    # S10: render the UN-stacked hallucination figure too, if its vendored data is present. Unlike S9 the
+    # reference arm is the BARE baseline (llama submits unaided — garbage), so the bar gap is validation's
+    # lift on a MESSY natural wrong-answer gap; the un-validatable residual is decomposed in the caption
+    # from the hand-read of every miss (DECISIONS D23).
+    if os.path.exists(HALLUCINATION_DATA_PATH):
+        hs = load_summary(HALLUCINATION_DATA_PATH)
+        hout = build_multi_figure(
+            hs, out_path=HALLUCINATION_OUT_PATH, caption_fn=hallucination_caption,
+            subtitle="llama-3.1-8b · CLEAN task · validation un-stacked · natural hallucination gap",
+            suptitle="Validation recovers the checkable half of a messy wrong-answer gap",
+            arm_display={
+                "baseline": "Baseline\n(hallucinates & submits)",
+                "validation_only": "+ Validation\n(catches what evidence can check)",
+            })
+        print(f"wrote {hout}")
+        for a in hs["arms"]:
             tail = ""
             if "gap_vs_baseline" in a:
                 gg = a["gap_vs_baseline"]

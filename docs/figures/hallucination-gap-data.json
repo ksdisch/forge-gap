@@ -1,0 +1,55 @@
+{
+  "model": "meta-llama/llama-3.1-8b-instruct",
+  "n": 40,
+  "fault_rate": 0.0,
+  "temperature": 0.7,
+  "fault_kind": "none",
+  "baseline_label": "baseline",
+  "arms": [
+    {
+      "label": "baseline",
+      "correct": 0,
+      "n": 40,
+      "rate": 0.0,
+      "wilson": [
+        0.0,
+        0.08762453925039232
+      ],
+      "by_stop": {
+        "submitted": 39,
+        "no_submit": 1
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 0,
+      "validations": 0
+    },
+    {
+      "label": "validation_only",
+      "correct": 18,
+      "n": 40,
+      "rate": 0.45,
+      "wilson": [
+        0.307050752809447,
+        0.6017117011155924
+      ],
+      "by_stop": {
+        "submitted": 39,
+        "no_submit": 1
+      },
+      "recoveries": 0,
+      "nudges": 0,
+      "submit_nudges": 0,
+      "validations": 20,
+      "gap_vs_baseline": {
+        "delta": 0.45,
+        "newcombe": [
+          0.2823320330200507,
+          0.6017117011155924
+        ],
+        "excludes_zero": true
+      }
+    }
+  ],
+  "summary_path": "runs/hallucination-ablation-summary.json"
+}

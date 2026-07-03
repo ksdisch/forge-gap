@@ -660,6 +660,89 @@ Because the effect is smaller, the confidence intervals have to be tighter to pr
 
 ---
 
+## S10 — The blind spot, measured: validation on a *messy* gap (+45 pp, and the 55% it can't touch)
+
+**What we built.** S9 proved the validation guardrail on its *best-case* testbed: mistral-nemo's wrong answers
+were pure arithmetic slips on correctly-retrieved data, so the self-consistency check caught every one (100%).
+S10 is the stress test (DECISIONS D23): the **same guardrail, byte-for-byte**, on **llama-3.1-8b** — a model
+whose natural failure is **hallucination** (it submits made-up numbers like `1234.56`, or even the literal
+formula string `"item_total_usd + ship_rate"`, even when the right data is in hand). New code was deliberately
+tiny:
+
+- `VALIDATION_ONLY_ARM` in `ablation.py` — validation **un-stacked** (no submit-nudge underneath). llama,
+  unlike nemo, *does* call `submit_answer` on its own (with garbage), so nothing masks the wrong-answer gap
+  and the reference arm is the bare baseline again.
+- `hallucination_ablation.py` — the thin 2-arm runner (mirrors `validation_ablation.py`), plus the
+  `hallucination-gap.png` figure in `chart.py`.
+- A real **harness fix** llama forced on us: it sometimes emits tool arguments as a JSON *array* (`["ORD-204"]`
+  instead of `{"order_id": "ORD-204"}`). That parses as valid JSON, but Python can't use a list as keyword
+  arguments — and the old code treated "JSON parsed" as "arguments OK," so the submit path crashed mid-run.
+  The fix routes any non-object arguments through the *existing* malformed-arguments path (honest error back
+  to the model), with two regression tests. Crucially it adds **no help** — the model's bad call stays the
+  model's failure; it just no longer crashes *our* code.
+
+**The result.** Pilot (N=8: fired 3×, lifted 0/8 → 3/8 — and one run showed the validator being *fooled*, more
+below), then the full run at **N=40** (sized with `stats.py`: at N=20 one lucky baseline `158` would turn the
+result into a null): **baseline 0/40 = 0%** (Wilson [0%, 8.8%]) vs **+validation 18/40 = 45%** ([30.7%, 60.2%]),
+gap **+45.0 pp, Newcombe [+28.2, +60.2]** — clears 0, non-overlapping bars, a **real** result. Validation fired
+20 times; 17 of the 18 wins were genuine fired-and-corrected runs (`100.0` → re-prompt → `158`).
+
+**The novel part — the residual, decomposed.** The 55% that validation did *not* recover is the guardrail's
+disclosed blind spot, now **measured** by hand-reading every miss:
+
+| Slice | Share | Why validation can't touch it |
+| --- | --- | --- |
+| never retrieved the rate | 35% (14/40) | nothing to recompute from — the validator **accepts by design** rather than guess |
+| wrong-record retrieval | 10% (4/40) | fetched the *wrong zone's* rate (`12`), submitted `152` = `140+12` — perfectly self-consistent, so the validator **accepts it** (the oracle still fails it) |
+| non-numeric submission | 7.5% (3/40) | a formula string can't be compared to a number; passed through, oracle fails it |
+| never submitted | 2.5% (1/40) | nothing submitted, nothing to validate |
+
+That 10% row is the exact fooling scenario D22 could only *describe* — S10 caught it happening, four times.
+(One nuance we disclose: the validator anchors on the *first* retrieved value of each field, so a run that
+fetched `12` first and `18` later was still checked against the wrong-evidence total.)
+
+**Teaching note.** The keeper idea: **a guardrail's honest limit is part of the measurement.** S9's 100% and
+S10's 45% are the *same guardrail* — what changed is the failure mix it was pointed at. On clean slips
+(right evidence, wrong sum) it recovers everything; on a messy hallucination gap it recovers exactly the
+self-consistency-violating slice and is structurally blind to the rest. Together the two stages bracket the
+mechanism: validation fixes *consistency* failures, never *evidence* failures — and the honest deliverable
+isn't "45%", it's "45% recovered, and here is precisely what the other 55% is." A deployer reading only S9
+would over-trust the check; S10 is the number that calibrates it.
+
+**New words.** *hallucinated answer*, *un-validatable slice*, *gap decomposition*, *un-stacked ablation*,
+*accept-by-design*, *first-evidence anchoring*.
+
+**Recall — try before you reveal:**
+
+Q1. S9 measured this same guardrail at 100%; S10 measured it at 45%. What actually changed — and why is 45%
+the *more* useful number for someone deploying a validation check?
+
+<details><summary>answer</summary>
+
+The guardrail didn't change — the *failure mix* did. nemo's misses were all arithmetic slips on correctly-retrieved evidence, the one failure a self-consistency check catches perfectly, so S9 was its best case. llama's misses are mostly *evidence* failures — 35% never fetched the rate, 10% fetched the wrong record, 7.5% submitted non-numbers — which a check that recomputes *from the model's own evidence* structurally cannot see. 45% is the more useful number because it tells a deployer what validation actually is: a consistency checker that recovers one slice of a messy gap, not a fix-all — and the hand-read decomposition tells them exactly which slice.
+
+</details>
+
+Q2. One llama run fetched the wrong zone's shipping rate (`12`), and validation *accepted* its `152`. Why is
+accepting it the **correct** behaviour for this guardrail — and what would it cost to "fix" it?
+
+<details><summary>answer</summary>
+
+Because `152` *is* self-consistent: `140 + 12` matches the evidence the model gathered this run, and the run's own evidence is all the validator is allowed to read. To reject `152` the validator would need to know the *true* rate is `18` — i.e., read the canonical records — which turns the self-consistency check into a smuggled answer key. That would force 100%, destroy the honesty of the measurement, and be undeployable (at run time in the real world you don't *have* the answer key). The blind spot is the price of not cheating; S10's contribution is measuring its size (10% of this model's gap) instead of just disclosing it exists. The oracle, which *does* read the canonical records, still fails the run — grading and guarding stay separate.
+
+</details>
+
+Q3. The first N=40 run crashed at trial 13. What was the root cause, and why did the fix route non-object
+arguments through the *existing* malformed-arguments path instead of trying to make the call work?
+
+<details><summary>answer</summary>
+
+Root cause: the code treated "the arguments string parsed as JSON" as "the arguments are usable" — but llama sometimes emits a JSON *array*, which parses fine yet isn't the name→value object a function call needs, so `args.get("value")` blew up on a list. The fix is one check — parsed arguments must actually be an object (`isinstance(args, dict)`) — and anything else takes the same path as unparseable JSON: the tool is not run, and the model observes an honest "malformed arguments" error. Routing through the existing path matters for measurement integrity: if the harness instead guessed what the model meant (e.g. mapped the array onto parameters), it would be silently *helping* the model — an unmeasured guardrail contaminating the baseline. The model's malformed call stays the model's failure; it just no longer crashes ours.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -733,4 +816,10 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **self-consistency check** — validating an answer against the evidence the model *itself* gathered this run (its own tool results), **not** against the grader's ground truth. The S9 guardrail: it recomputes the total from the retrieved data, so it catches "had the pieces, summed wrong" but can be fooled by a wrong-record retrieval — a principled blind spot that keeps it from being a smuggled answer key.
 - **stacked ablation** — an ablation whose reference arm already has one guardrail switched on (here submit-nudge), so a *second* guardrail (validation) is measured *on top* of it. Used when the lower guardrail is what makes the higher one's failure visible at all (you can't measure "submits the right number" until you've got it to submit).
 - **scaffolding** — a guardrail whose role in an experiment is to *expose* the failure another guardrail targets, by clearing the failure that was masking it (submit-nudge is scaffolding for the S9 validation measurement: 0% → 75% first, so the wrong-answer residual becomes measurable).
+- **hallucinated answer** — a submitted value grounded in nothing the model retrieved (llama-8b's `1234.56`, or the literal formula string `"item_total_usd + ship_rate"`); the messy wrong-answer failure S10 pointed validation at.
+- **un-validatable slice** — the fraction of a wrong-answer gap a self-consistency check structurally cannot catch: missing evidence (nothing to recompute from), wrong-record retrieval (a self-consistent wrong total), or a non-numeric submission. S10 measured it at 55% of llama-8b's gap.
+- **gap decomposition** — hand-reading every miss and splitting a measured gap into labelled failure slices with shares (S10: 35% never-retrieved · 10% wrong-record · 7.5% non-numeric · 2.5% no-submit), so the residual is *explained*, not just reported.
+- **un-stacked ablation** — an ablation whose reference arm is the bare baseline again (contrast *stacked*): possible in S10 because llama-8b submits unaided, so no lower guardrail is needed to expose the wrong-answer failure.
+- **accept-by-design** — the validator's rule when it *cannot* recompute (evidence missing or the submission non-numeric): accept rather than guess. Prevents false rejections, and is exactly what makes the un-validatable slice measurable instead of hidden.
+- **first-evidence anchoring** — the validator recomputes from the *first* retrieved value of each field, so a run that fetched the wrong rate first (and the right one later) is still checked against the wrong-evidence total. A disclosed design property of `scenario.validate`, observed once in S10.
 - **incremental (marginal) lift** — the extra completion a guardrail adds *over the arm below it*, not over the bare baseline. S9 reports validation's incremental lift over submit-nudge (75% → 100% = +25 pp), which isolates validation's own contribution from submit-nudge's.

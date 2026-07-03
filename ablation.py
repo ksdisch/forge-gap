@@ -50,6 +50,10 @@ SUBMIT_NUDGE_ARM = {"label": "submit_nudge", "run_kwargs": {"submit_nudge": True
 # model's own retrieved evidence and re-prompt. The reference for its gap is the submit_nudge arm, not
 # baseline, so the Newcombe delta isolates validation's INCREMENTAL lift (DECISIONS D22).
 VALIDATION_ARM = {"label": "validation", "run_kwargs": {"submit_nudge": True, "validate": True}}
+# S10: validation UN-stacked (no submit_nudge) — for a model that submits on its own (llama-3.1-8b
+# submits hallucinated numbers, D21/D23), the reference is the bare baseline, so this arm isolates
+# validation alone against a messy natural wrong-answer gap.
+VALIDATION_ONLY_ARM = {"label": "validation_only", "run_kwargs": {"validate": True}}
 
 
 def run_arms(
