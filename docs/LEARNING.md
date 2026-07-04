@@ -743,6 +743,71 @@ Root cause: the code treated "the arguments string parsed as JSON" as "the argum
 
 ---
 
+## S11 — Declared done: the capstone ladder, and why stopping is a result too
+
+**What we built.** Nothing that calls a model. S11 (DECISIONS D24) freezes scope and makes the finished
+story legible: one **capstone figure** (`docs/figures/capstone-ladder.png`) that reads the whole project as
+a **capability ladder** — the same clean task across three models from strong to weak, baseline vs
++matched-guardrails — plus README §12 (the whole story on one page) and this spine close-out. The other
+two candidate directions (a live capability-ladder sweep across more models; a genuinely self-hosted
+endpoint) were weighed and recorded in D24 as *new projects*, not pending stages.
+
+**How the figure stays honest (the part worth defending).** Three design calls carry the integrity:
+
+- **GLM-4.6 gets no guardrail bar.** No guardrail arm was ever *run* on its clean task — four probes showed
+  there was nothing to close — so a second 100% bar would plot a measurement that doesn't exist. An
+  annotation states the finding instead, and the caption notes GLM's +32.5 pp win lived on the *injected*
+  testbed.
+- **nemo's +100 pp gap is a disclosed cross-run comparison.** Its 0/20 baseline is the S8 run; its 40/40
+  stack is the S9 run. Two independent proportions make a valid Newcombe interval ([+81.7, +100.0]), but the
+  pair is *not* one paired ablation — so the caption says "CROSS-RUN" rather than letting it read as one.
+- **The data file is derived, never hand-typed.** `chart.py` rebuilds `capstone-data.json` from the vendored
+  per-stage JSONs on every run (recomputing the cross-run gap via `stats.py`), and a test pins the committed
+  file to a fresh derivation — so the summary figure *cannot* silently drift from the per-stage figures it
+  summarizes. The single hand-typed number (S3's 20/20, which predates the vendoring convention) is a
+  documented constant.
+
+**Teaching note.** The keeper idea: **declaring done is a measured decision, not a fade-out.** The evidence
+that S11 was the right stage to stop: the thesis closed at S9 (every failure class has its matched guardrail,
+each under the CI gate), and S10 *bracketed* the last mechanism (best case 100%, messy case 45% + a
+quantified blind spot). Bracketed at both ends means more bars would add breadth, not understanding — and a
+capstone that inherits every per-stage honesty rule (verdict colouring, disclosed provenance, the non-bar)
+is worth more to a reader than another ablation. Stopping with evidence is the same skill as pivoting with
+evidence (S3's kill-trigger, S7's stop rule) — pre-committed criteria, honestly applied.
+
+**New words.** *capstone figure*, *capability ladder*, *cross-run comparison*, *derived data file*.
+
+**Recall — try before you reveal:**
+
+Q1. The capstone shows GLM-4.6 with only ONE bar. Why — and what exactly would be dishonest about adding a
+second 100% bar labelled "+guardrails"?
+
+<details><summary>answer</summary>
+
+Because no guardrail arm was ever run on GLM's clean task. S3/S6/S7 showed the baseline was already at ceiling (20/20 clean, self-heals malformed calls, 8/8 twice on hardened tasks), so there was no gap for a guardrail to close and the arm was never spent. A "+guardrails 100%" bar would therefore plot a *measurement that doesn't exist* — a reader would take it as "we ran guardrails on GLM and they held at 100%," which we never did. The honest move is the annotation ("no natural gap — nothing to close") and a caption note that GLM's real guardrail win (+32.5 pp) was on the *injected* testbed — a different chart, saying so.
+
+</details>
+
+Q2. nemo's +100 pp gap on the capstone is flagged "CROSS-RUN." What does that mean, why is the statistic
+still valid, and why must the caption disclose it anyway?
+
+<details><summary>answer</summary>
+
+The two bars come from two different experiments: the 0/20 baseline was measured in S8, and the 40/40 submit-nudge+validation stack in S9. The Newcombe interval is still valid because it only assumes two *independent* proportions — which two separate runs are. But every other gap in the project comes from a *paired* ablation (both arms over the same trials in one run), so without the flag a reader would assume this one does too. Disclosure keeps the figure's claims exactly as strong as the data — the house rule that a chart must never read better than what was measured.
+
+</details>
+
+Q3. `capstone-data.json` is rebuilt from the per-stage JSONs every time `chart.py` runs. What failure mode
+does that *derived* design prevent, and what's the one hand-typed number in the ladder?
+
+<details><summary>answer</summary>
+
+It prevents **drift**: if the summary's numbers were typed by hand, a later correction to a per-stage figure (or a transcription typo) could leave the capstone quietly disagreeing with the figures it claims to summarize — the worst kind of error in a deliverable, because nothing would flag it. Deriving at render time (plus the test that the committed file equals a fresh derivation) makes disagreement impossible. The one hand-typed number is GLM's 20/20 from S3, which predates the vendored-summary convention — carried as a documented constant in `chart.py` and disclosed in D24.
+
+</details>
+
+---
+
 ## Glossary
 
 Terms are added the first time they appear. If one's missing or unclear, that's a doc bug — flag it.
@@ -823,3 +888,7 @@ Terms are added the first time they appear. If one's missing or unclear, that's 
 - **accept-by-design** — the validator's rule when it *cannot* recompute (evidence missing or the submission non-numeric): accept rather than guess. Prevents false rejections, and is exactly what makes the un-validatable slice measurable instead of hidden.
 - **first-evidence anchoring** — the validator recomputes from the *first* retrieved value of each field, so a run that fetched the wrong rate first (and the right one later) is still checked against the wrong-evidence total. A disclosed design property of `scenario.validate`, observed once in S10.
 - **incremental (marginal) lift** — the extra completion a guardrail adds *over the arm below it*, not over the bare baseline. S9 reports validation's incremental lift over submit-nudge (75% → 100% = +25 pp), which isolates validation's own contribution from submit-nudge's.
+- **capstone figure** — the single summary chart a finished project leads with; here the S11 capability ladder, which re-plots only already-measured numbers under every per-stage honesty rule.
+- **capability ladder** — the same task across models of increasing weakness, showing how the natural gap opens up and how much of it a matched guardrail closes at each rung (GLM: no gap → nemo: fully closed → llama: 45%, blind spot bounded).
+- **cross-run comparison** — a gap computed between arms measured in two *different* experiments (nemo's S8 baseline vs its S9 stack). Statistically valid for independent proportions, but not a *paired* ablation — so it's disclosed on the figure rather than left to read as one.
+- **derived data file** — a vendored JSON built automatically from other vendored JSONs at render time rather than typed by hand (`capstone-data.json`), so a summary can never silently drift from its sources; pinned by a test that the committed file equals a fresh derivation.

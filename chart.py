@@ -39,6 +39,18 @@ VALIDATION_OUT_PATH = os.path.join("docs", "figures", "validation-gap.png")
 HALLUCINATION_DATA_PATH = os.path.join("docs", "figures", "hallucination-gap-data.json")
 HALLUCINATION_OUT_PATH = os.path.join("docs", "figures", "hallucination-gap.png")
 
+# S11: the CAPSTONE capability-ladder figure — three models on the CLEAN task, baseline vs
+# +matched-guardrails per model. Its data JSON is DERIVED, not hand-typed: rebuilt on every run
+# from the vendored per-stage JSONs above (DECISIONS D24), so the summary figure can never
+# silently drift from the per-stage figures it summarizes.
+CAPSTONE_DATA_PATH = os.path.join("docs", "figures", "capstone-data.json")
+CAPSTONE_OUT_PATH = os.path.join("docs", "figures", "capstone-ladder.png")
+
+# S3's measured constant: GLM-4.6 aced the clean task 20/20 (DECISIONS D12). That diagnostic
+# predates the vendored-summary convention (D18), so the capstone carries it as a documented
+# constant rather than a file read — the one hand-typed number in the ladder, disclosed.
+GLM_CLEAN_S3 = {"correct": 20, "n": 20}
+
 # Palette: muted gray for the no-help baseline, positive teal for a mechanism that really lifts,
 # neutral steel for a mechanism whose gap straddles 0 (a null — colour follows the measured verdict,
 # never the hoped-for one, so the figure can't over-claim).
@@ -204,6 +216,82 @@ def hallucination_caption(s: dict) -> str:
     )
 
 
+# --- S11: the capstone capability ladder (derived data + pure helpers) --------
+
+def _arm(s: dict, label: str) -> dict:
+    """The arm with this label from an `arms`-shaped summary. Raises StopIteration if absent —
+    which is the drift alarm we want: a renamed arm label must break the capstone loudly."""
+    return next(a for a in s["arms"] if a["label"] == label)
+
+
+def _slim(arm: dict) -> dict:
+    """Just the fields a capstone bar needs from a vendored arm (correct / n / rate / wilson)."""
+    return {k: arm[k] for k in ("correct", "n", "rate", "wilson")}
+
+
+def build_capstone_data() -> dict:
+    """Derive the capstone capability-ladder summary from the vendored per-stage JSONs (D24).
+
+    Nothing here is hand-typed except S3's documented 20/20 (`GLM_CLEAN_S3`, which predates the
+    vendoring convention): nemo's bars come straight from the S8/S9 files, llama's from the S10
+    file, and the one gap that spans two runs (nemo's S8 baseline vs its S9 stack) is recomputed
+    fresh via `stats.newcombe_diff` — a CROSS-RUN comparison, flagged as such so the caption can
+    disclose it. GLM gets NO guardrail bar: no guardrail arm was ever run on its clean task
+    (there was nothing to close), and drawing one would fabricate a measurement.
+    """
+    from stats import excludes_zero, newcombe_diff, wilson
+
+    weak = load_summary(WEAK_DATA_PATH)            # S8: nemo's bare baseline (0/20)
+    val = load_summary(VALIDATION_DATA_PATH)       # S9: nemo's submit-nudge + validation stack (40/40)
+    hall = load_summary(HALLUCINATION_DATA_PATH)   # S10: llama baseline vs +validation (one ablation)
+
+    k, n = GLM_CLEAN_S3["correct"], GLM_CLEAN_S3["n"]
+    glm_base = {"correct": k, "n": n, "rate": k / n, "wilson": list(wilson(k, n))}
+
+    nemo_base = _slim(_arm(weak, "baseline"))
+    nemo_best = _slim(_arm(val, "validation"))
+    d, lo, hi = newcombe_diff(nemo_base["correct"], nemo_base["n"],
+                              nemo_best["correct"], nemo_best["n"])
+    nemo_gap = {"delta": d, "newcombe": [lo, hi],
+                "excludes_zero": excludes_zero(lo, hi), "cross_run": True}
+
+    llama_gap = {**_arm(hall, "validation_only")["gap_vs_baseline"], "cross_run": False}
+
+    return {
+        "kind": "capstone-ladder",
+        "task": "clean (no fault injection)",
+        "temperature": hall["temperature"],
+        "models": [
+            {"name": "GLM-4.6", "tier": "strong", "model": "z-ai/glm-4.6",
+             "baseline": glm_base, "guardrails": None, "gap": None,
+             "source": "S3 clean diagnostic",
+             "note": "no natural gap — nothing to close"},
+            {"name": "mistral-nemo", "tier": "mid", "model": "mistralai/mistral-nemo",
+             "baseline": nemo_base,
+             "guardrails": {**nemo_best, "label": "+ submit-nudge\n+ validation"},
+             "gap": nemo_gap, "source": "S8 baseline · S9 stack (cross-run)"},
+            {"name": "llama-3.1-8b", "tier": "weak", "model": "meta-llama/llama-3.1-8b-instruct",
+             "baseline": _slim(_arm(hall, "baseline")),
+             "guardrails": {**_slim(_arm(hall, "validation_only")), "label": "+ validation"},
+             "gap": llama_gap, "source": "S10 (one ablation)"},
+        ],
+    }
+
+
+def capstone_caption(s: dict) -> str:
+    """Honesty caption for the capstone ladder (D24) — three disclosures, none optional:
+    every bar is the CLEAN task; GLM's guardrail win lived on the INJECTED testbed and is
+    deliberately not a bar here; nemo's gap is CROSS-RUN (S8 baseline vs S9 stack); and llama's
+    partial bar is the blind-spot story (55% un-validatable, decomposed on the S10 figure)."""
+    return (
+        f"All bars: CLEAN task, NO fault injection  ·  temp {s['temperature']}  ·  "
+        f"Wilson 95% whiskers  ·  Newcombe 95% on each gap\n"
+        f"GLM-4.6 has no natural gap — its +32.5 pp error-recovery win was on the INJECTED testbed (S4–S5)\n"
+        f"nemo gap is CROSS-RUN (S8 baseline N=20 vs S9 stack N=40)  ·  "
+        f"llama's 55% residual is un-validatable (decomposed on the S10 figure)"
+    )
+
+
 # --- the figure (matplotlib; smoke-verified by running chart.py) --------------
 
 def build_figure(s: dict, out_path: str = OUT_PATH) -> str:
@@ -357,6 +445,89 @@ def build_multi_figure(s: dict, out_path: str = MULTI_OUT_PATH, *,
     return out_path
 
 
+def build_capstone_figure(s: dict, out_path: str = CAPSTONE_OUT_PATH) -> str:
+    """Draw the capstone capability ladder: three model groups on one clean-task axis (D24).
+
+    Five bars — GLM alone (a single 100% baseline: no guardrail arm was ever run on its clean
+    task, so a second bar would fabricate a measurement; an annotation carries the finding
+    instead), then baseline vs +matched-guardrails for nemo and llama. Bar colour keeps the
+    house rule: teal only where the measured gap clears 0 (both real here), grey baselines."""
+    import matplotlib
+    matplotlib.use("Agg")  # headless backend: render straight to a file, no display
+    import matplotlib.pyplot as plt
+    from matplotlib.transforms import blended_transform_factory
+
+    glm, nemo, llama = s["models"]
+
+    def _mech_color(m: dict) -> str:
+        return MECHANISM_COLOR if m["gap"]["excludes_zero"] else NULL_COLOR
+
+    # (x, bar-dict, colour, per-bar tick label) — grouped per model with a gap between groups.
+    bars = [
+        (0.0, glm["baseline"], BASELINE_COLOR, "baseline"),
+        (1.9, nemo["baseline"], BASELINE_COLOR, "baseline"),
+        (2.9, nemo["guardrails"], _mech_color(nemo), nemo["guardrails"]["label"]),
+        (4.8, llama["baseline"], BASELINE_COLOR, "baseline"),
+        (5.8, llama["guardrails"], _mech_color(llama), llama["guardrails"]["label"]),
+    ]
+
+    fig, ax = plt.subplots(figsize=(10.0, 6.2), dpi=150)
+    ax.bar(
+        [x for x, *_ in bars], [b["rate"] * 100 for _, b, *_ in bars],
+        width=0.62, color=[c for *_, c, _ in bars], edgecolor="#333333", linewidth=1.0,
+        yerr=[[wilson_yerr(b)[0] * 100 for _, b, *_ in bars],
+              [wilson_yerr(b)[1] * 100 for _, b, *_ in bars]],
+        capsize=7, error_kw=dict(ecolor="#222222", elinewidth=1.6, capthick=1.6), zorder=3,
+    )
+
+    # Data label above each bar's upper whisker cap (% + k/N).
+    for x, b, *_ in bars:
+        ax.text(x, b["wilson"][1] * 100 + 2.5, bar_label(b),
+                ha="center", va="bottom", fontsize=10.5, fontweight="bold", color="#222222")
+
+    # GLM's annotation sits where a guardrail bar would have been — the honest non-bar (D24).
+    ax.text(1.0, 55, "no natural gap —\nnothing to close\n(S3 20/20 clean ·\nS7 8/8 + 8/8 hardened)",
+            ha="center", va="center", fontsize=9, color="#222222",
+            bbox=dict(boxstyle="round,pad=0.4", fc="#f7f7f7", ec=BASELINE_COLOR, lw=1.2))
+
+    # Per-model gap annotation, low inside each guardrail bar (same shape as the N-bar figures).
+    for x, m in ((2.9, nemo), (5.8, llama)):
+        ax.text(x, 4, gap_tag({"gap_vs_baseline": m["gap"]}),
+                ha="center", va="bottom", fontsize=9, color="#222222",
+                bbox=dict(boxstyle="round,pad=0.35", fc="#f7f7f7", ec=_mech_color(m), lw=1.2))
+
+    # Per-bar tick labels; model-group names sit below them via a blended transform
+    # (x in data coords so it tracks the group, y in axes coords so it clears the labels).
+    ax.set_xticks([x for x, *_ in bars])
+    ax.set_xticklabels([lbl for *_, lbl in bars], fontsize=9.5)
+    group_y = blended_transform_factory(ax.transData, ax.transAxes)
+    for cx, m in ((0.0, glm), (2.4, nemo), (5.3, llama)):
+        ax.text(cx, -0.14, f"{m['name']}  ({m['tier']})", transform=group_y,
+                ha="center", va="top", fontsize=11, fontweight="bold", color="#222222")
+
+    ax.set_ylabel("Task completion rate (clean task)", fontsize=12)
+    ax.set_ylim(0, 118)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_yticklabels([f"{t}%" for t in (0, 20, 40, 60, 80, 100)])
+    ax.set_xlim(-0.7, 6.5)
+    ax.yaxis.grid(True, color="#e9e9e9", lw=1.0)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+
+    fig.suptitle("The capability ladder: guardrail payoff grows as the model weakens",
+                 fontsize=14, fontweight="bold", y=0.98)
+    ax.set_title("same CLEAN multi-step tool task · matched guardrails per model · S3 / S8+S9 / S10 measured results",
+                 fontsize=10, color="#666666", pad=10)
+    fig.text(0.5, 0.012, capstone_caption(s), ha="center", va="bottom",
+             fontsize=8.5, color="#777777", style="italic")
+
+    fig.tight_layout(rect=(0, 0.12, 1, 0.95))
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def main() -> int:
     s = load_summary()
     out = build_figure(s)
@@ -439,6 +610,29 @@ def main() -> int:
                 v = "REAL" if gg["excludes_zero"] else "null"
                 tail = f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}"
             print(f"  {a['label']:<16} {pct(a['rate'])} ({a['correct']}/{a['n']}){tail}")
+
+    # S11: derive + render the CAPSTONE capability ladder, if all three source JSONs are present.
+    # capstone-data.json is REWRITTEN from its sources on every run — never hand-edited (D24) —
+    # so this summary figure cannot drift from the per-stage figures above.
+    if all(os.path.exists(p) for p in (WEAK_DATA_PATH, VALIDATION_DATA_PATH, HALLUCINATION_DATA_PATH)):
+        cs = build_capstone_data()
+        with open(CAPSTONE_DATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(cs, f, indent=2)
+            f.write("\n")
+        cout = build_capstone_figure(cs)
+        print(f"wrote {CAPSTONE_DATA_PATH} (derived)")
+        print(f"wrote {cout}")
+        for m in cs["models"]:
+            b = m["baseline"]
+            line = f"  {m['name'] + ' (' + m['tier'] + ')':<22} baseline {pct(b['rate'])} ({b['correct']}/{b['n']})"
+            if m["guardrails"]:
+                g, gg = m["guardrails"], m["gap"]
+                v = "REAL" if gg["excludes_zero"] else "null"
+                line += (f" -> +guardrails {pct(g['rate'])} ({g['correct']}/{g['n']})"
+                         f"   gap {signed_pp(gg['delta'])} pp {fmt_pp_ci(gg['newcombe'][0], gg['newcombe'][1])} -> {v}")
+            else:
+                line += "   (no gap to close)"
+            print(line)
     return 0
 
 

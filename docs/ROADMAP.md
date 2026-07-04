@@ -21,16 +21,16 @@ flowchart TB
     S8["S8 · Weak-model natural gap · D21<br/>submit-nudge: 0% → 75% = +75pp ✓ (mistral-nemo)"]:::done
     S9["S9 · Validation guardrail · D22<br/>stacked: 75% → 100% = +25pp ✓ (mistral-nemo)"]:::done
     S10["S10 · Harder validation testbed · D23<br/>llama-8b: 0% → 45% = +45pp ✓ · blind spot measured"]:::done
-    F["S11–S12 · planned<br/>more models / fault types"]:::planned
+    S11["S11 · Declared done · D24<br/>capstone capability-ladder figure + write-up"]:::done
 
-    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9 --> S10 --> F
+    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9 --> S10 --> S11
 
     classDef done fill:#2a9d8f,stroke:#1d6f66,color:#ffffff;
     classDef goal fill:#e9c46a,stroke:#b8902f,color:#222222,stroke-width:2px;
     classDef planned fill:#eeeeee,stroke:#9e9e9e,color:#555555;
 ```
 
-**Legend:** 🟩 shipped (S0–S10) · ⬜ planned (S11–S12). Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls), **S7 = no natural gap** (a strong model doesn't break on its own — injected faults are required), **S8 = +75 pp ✓** (a *weak* model's natural no-submit gap, closed by a matched submit-nudge while retry-nudge nulls), **S9 = +25 pp ✓** (a *validation* guardrail, stacked on submit-nudge, closes the residual wrong-answer gap — completing the "each failure → its matched guardrail" thesis: 0% → 75% → 100% on mistral-nemo), **S10 = +45 pp ✓** (the same validation guardrail on llama-8b's *messy* hallucination gap — it recovers the checkable slice, and the 55% residual is the blind spot, hand-read and quantified). The detailed table below is the source of truth; this map is its at-a-glance view.
+**Legend:** 🟩 shipped (S0–S11) — **the project is complete**. Key measured outcomes live in the node itself: **S4 = +32.5% ✓** (error-recovery closes the injected gap), **S6 = null** (GLM self-heals malformed calls), **S7 = no natural gap** (a strong model doesn't break on its own — injected faults are required), **S8 = +75 pp ✓** (a *weak* model's natural no-submit gap, closed by a matched submit-nudge while retry-nudge nulls), **S9 = +25 pp ✓** (a *validation* guardrail, stacked on submit-nudge, closes the residual wrong-answer gap — completing the "each failure → its matched guardrail" thesis: 0% → 75% → 100% on mistral-nemo), **S10 = +45 pp ✓** (the same validation guardrail on llama-8b's *messy* hallucination gap — it recovers the checkable slice, and the 55% residual is the blind spot, hand-read and quantified), **S11 = declared done** (the capstone capability-ladder figure + the one-page write-up — no new measurements; the story is bracketed at both ends, so the project stops on purpose). The detailed table below is the source of truth; this map is its at-a-glance view.
 
 | Stage | What it does (plain English) | Why it exists | Status |
 |-------|------------------------------|---------------|--------|
@@ -45,9 +45,9 @@ flowchart TB
 | **S8** | The **weak-model natural-gap** experiment: hold the task fixed and CLEAN, swap GLM-4.6 for a weaker model (`mistral-nemo`), and ablate a NEW **submit-nudge** guardrail (re-prompt a run that stalled without submitting). Pilot-gated; pivoted here after two weak models exposed *non-tool-error* failures. | Tests the **capability × guardrail interaction**: a weak-but-tool-capable model needs a guardrail GLM-4.6 didn't. | ✅ done — **measured**: 0% → 75%, **+75 pp** (Newcombe [+47.8, +88.8]); retry-nudge a null in the same run |
 | **S9** | The **validation guardrail** (D22): stack a *self-consistency* check on submit-nudge — recompute the total from the model's OWN retrieved data (never the answer key) and re-prompt a mismatch — and measure its incremental lift on mistral-nemo's residual wrong-answer (`140`, shipping forgotten) misses. | Closes the **last** failure row — *wrong-answer, no error* — that error-recovery / retry-nudge / submit-nudge structurally can't see, **completing** the matched-guardrail thesis. | ✅ done — **measured**: 75% → 100%, **+25 pp** (Newcombe [+11.1, +40.2]); validation fired **6/6** genuine `140→158` corrections |
 | **S10** | The **harder validation testbed** (D23): the *same* validation guardrail, un-stacked, on **llama-3.1-8b** — whose natural failure is *hallucinating* the final number. Ablate baseline vs +validation on the clean task, then **hand-read every miss** to decompose the residual into validation-catchable vs un-validatable. | Turns the validator's *disclosed* blind spot (D22) into a **measured number**: how much of a messy natural wrong-answer gap can self-consistency actually close? | ✅ done — **measured**: 0% → 45%, **+45 pp** (Newcombe [+28.2, +60.2]); residual = 35% never-retrieved · 10% wrong-record (validator fooled) · 7.5% non-numeric · 2.5% no-submit |
-| **S11–S12** | Layer any **further** fault types / models. | How much *each* guardrail closes the gap. | ⬜ planned |
+| **S11** | **Declare done + write-up** (D24): the **capstone capability-ladder figure** — three models on the clean task, baseline vs +matched-guardrails, derived entirely from already-measured numbers — plus README §12 (the whole story on one page) and the spine close-out. No model calls. | A finished measurement project ends with one legible figure and an honest statement of why it stops; the two roads not taken (live ladder sweep, self-hosted endpoint) are recorded as future *projects*, not pending stages. | ✅ done |
 
-*(forge-gap runs **S0 → ~S12**; the gap-closure chart now exists at **S5**, and **S6–S12** layer the remaining mechanisms one at a time and extend it — their exact split is still TBD, but the **work items** are fixed even where the numbering isn't. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
+*(forge-gap ran **S0 → S11** and is **complete**: the headline chart shipped at **S5**, **S6–S10** layered and boundary-tested the remaining mechanisms one at a time, and **S11** closed the project with the capstone figure + write-up. The canonical cross-project tracker is `ACTIVE-PLAN.md` in the separate hub repo; this roadmap is the in-repo view.)*
 
 > **Honesty rule (load-bearing):** the framing is always *"reproduced and measured a known
 > primitive — here's the narrow, measured delta,"* never *"I invented this."* If a gap is
@@ -197,6 +197,21 @@ at the parse with two regression tests and disclosed — the fix adds no help, i
 measured result are DECISIONS **D23**; figure `docs/figures/hallucination-gap.png` (README §11). All **twelve**
 offline suites green. **Next (S11+):** optional — more models / fault types; or declare done and write up (the
 D23 runner-up).
+
+**S11 done — declared done, with the capstone to show for it (the project is complete).** The D23 runner-up,
+chosen at D24: freeze scope and make the finished story legible — **no new measurements, no model calls**. The
+deliverable is the **capstone capability-ladder figure** (`docs/figures/capstone-ladder.png`, README §12): the
+same clean task across three models from strong to weak — **GLM-4.6** at 100% with **no guardrail bar** (none
+was ever run on its clean task; there was nothing to close — an annotation carries the finding, so the figure
+can't fabricate a measurement), **mistral-nemo** 0% → 100% under submit-nudge + validation (**+100.0 pp**,
+Newcombe [+81.7, +100.0] — a disclosed **cross-run** gap, S8 baseline vs S9 stack), and **llama-3.1-8b**
+0% → 45% under validation alone (+45.0 pp [+28.2, +60.2], the S10 same-run result; the 55% residual is the
+measured blind spot). The figure's data (`capstone-data.json`) is **derived, never hand-typed** — rebuilt from
+the vendored per-stage JSONs on every `uv run chart.py`, with a test pinning the committed file to a fresh
+derivation, so the summary cannot drift from the figures it summarizes. README §12 tells the whole story on one
+page; the "Limitations" section now reads *declared done*. The roads not taken (a live capability-ladder sweep;
+a genuinely self-hosted endpoint) are recorded in DECISIONS **D24** as future *projects*, not pending stages.
+All offline suites green. **There is no "next" — that's the result.**
 
 > **S3 watch-out — this fired.** The risk was real: GLM-4.6 passed **20/20**, so there's no
 > natural gap to measure. We did exactly what this note pre-committed to — **inject faults and say

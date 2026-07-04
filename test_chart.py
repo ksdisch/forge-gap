@@ -18,11 +18,14 @@ from __future__ import annotations
 import sys
 
 from chart import (
+    CAPSTONE_DATA_PATH,
     HALLUCINATION_DATA_PATH,
     MULTI_DATA_PATH,
     VALIDATION_DATA_PATH,
     WEAK_DATA_PATH,
     bar_label,
+    build_capstone_data,
+    capstone_caption,
     caption,
     fmt_pp_ci,
     gap_label,
@@ -283,6 +286,45 @@ def test_vendored_hallucination_matches() -> None:
           close(s["arms"][1]["gap_vs_baseline"]["delta"], 0.45))
 
 
+# --- S11: the capstone capability ladder (derived data + caption) ---
+def test_capstone_data_derivation() -> None:
+    print("build_capstone_data — derived from the vendored per-stage JSONs, never hand-typed")
+    s = build_capstone_data()
+    glm, nemo, llama = s["models"]
+    check("three models, strong -> weak",
+          [m["tier"] for m in s["models"]] == ["strong", "mid", "weak"])
+    check("GLM baseline is S3's 20/20",
+          glm["baseline"]["correct"] == 20 and glm["baseline"]["n"] == 20)
+    check("GLM has NO guardrail bar (none was measured on its clean task — the honest non-bar)",
+          glm["guardrails"] is None and glm["gap"] is None)
+    check("nemo baseline is S8's 0/20",
+          nemo["baseline"]["correct"] == 0 and nemo["baseline"]["n"] == 20)
+    check("nemo guardrail bar is S9's 40/40 stack",
+          nemo["guardrails"]["correct"] == 40 and nemo["guardrails"]["n"] == 40)
+    check("nemo gap is +100 pp and real",
+          close(nemo["gap"]["delta"], 1.0) and nemo["gap"]["excludes_zero"] is True)
+    check("nemo gap is flagged CROSS-RUN (S8 vs S9 — disclosed)", nemo["gap"]["cross_run"] is True)
+    check("nemo cross-run Newcombe stays clear of zero (lower bound > +80 pp)",
+          nemo["gap"]["newcombe"][0] > 0.80)
+    check("llama pair matches the S10 file exactly (a genuine same-run ablation)",
+          llama["baseline"]["correct"] == 0 and llama["guardrails"]["correct"] == 18
+          and close(llama["gap"]["delta"], 0.45) and llama["gap"]["cross_run"] is False)
+
+
+def test_vendored_capstone_matches_derivation() -> None:
+    print("vendored capstone data — equal to a fresh derivation (the anti-drift rule, D24)")
+    check("capstone-data.json == build_capstone_data()",
+          load_summary(CAPSTONE_DATA_PATH) == build_capstone_data())
+
+
+def test_capstone_caption() -> None:
+    print("capstone_caption — carries all three honesty disclosures")
+    cap = capstone_caption(build_capstone_data())
+    for piece in ("CLEAN task", "INJECTED testbed", "CROSS-RUN", "un-validatable", "temp 0.7"):
+        check(f"capstone caption mentions '{piece}'", piece in cap)
+    check("capstone caption states GLM has no natural gap", "no natural gap" in cap)
+
+
 def main() -> int:
     print("Offline tests: gap-closure figure helpers\n" + "-" * 42)
     for t in (
@@ -302,6 +344,9 @@ def main() -> int:
         test_vendored_validation_matches,
         test_hallucination_caption,
         test_vendored_hallucination_matches,
+        test_capstone_data_derivation,
+        test_vendored_capstone_matches_derivation,
+        test_capstone_caption,
     ):
         t()
         print()
