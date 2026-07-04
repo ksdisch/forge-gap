@@ -15,12 +15,13 @@ forge-gap/
 ├─ stats.py            # S4 Wilson + Newcombe confidence intervals
 ├─ ablation.py         # ablation harness: run_arms (N arms, S6) + run_ablation (2-arm legacy, S4), with CIs
 ├─ malformed_ablation.py # S6 three-arm malformed-call ablation: baseline / +error-recovery / +retry-nudge
-├─ chart.py            # the deliverables: renders the S5 gap-closure + S6 malformed-gap + S8 weak-gap + S9 validation figures from saved numbers
+├─ chart.py            # the deliverables: renders every figure (S5–S10 per-stage + the S11 capstone ladder) from saved numbers
 ├─ weak_ablation.py    # the S8 clean 3-arm ablation on a weak model (baseline / +retry-nudge / +submit-nudge)
 ├─ validation_ablation.py # the S9 stacked 2-arm ablation on a weak model (submit-nudge reference / +validation)
+├─ hallucination_ablation.py # the S10 un-stacked 2-arm ablation on llama-8b (bare baseline / +validation)
 ├─ verify.py           # smoke test: plain chat + one tool-calling round-trip
 ├─ test_*.py           # offline unit tests (oracle, faults, runner, stats, recover, ablation, chart, malformed, nudge, submit_nudge, validation)
-├─ docs/figures/       # the committed gap-closure + malformed-gap + weak-gap + validation charts (PNG) + their vendored data (JSON)
+├─ docs/figures/       # every committed chart (PNG) + its vendored data (JSON), incl. the S11 capstone ladder
 ├─ .env            # your key lives here (gitignored)
 ├─ .env.example    # template
 └─ pyproject.toml  # uv project (Python 3.11+, openai + python-dotenv + matplotlib)
@@ -262,6 +263,49 @@ uv run hallucination_ablation.py meta-llama/llama-3.1-8b-instruct 40   # args: m
 Offline: `uv run test_nudge.py` (the args-shape regressions) and `uv run test_chart.py` (the vendored figure
 data). The full reasoning is in `docs/DECISIONS.md` **D23**.
 
+## 12. The whole story on one page (S11 — declared done)
+
+The project is **finished on purpose**. Four failure classes, each matched to the one guardrail that fixes
+it, each measured under the same honesty gate (a Wilson 95% CI per arm, a Newcombe 95% CI on the gap, and
+*straddles-zero = report a null, never a win*):
+
+| Failure class | Matched guardrail | Measured result | Testbed |
+| --- | --- | --- | --- |
+| Transient tool error (503) | **error-recovery** (harness retry, no model turn) | **+32.5 pp** [+17.3, +48.0] | GLM-4.6, **injected** (S4) |
+| Malformed tool call | **retry-nudge** (corrective re-prompt) | **null** — GLM self-heals unaided | GLM-4.6, injected (S6) |
+| Never submits (right answer, no terminal call) | **submit-nudge** (prompt to actually submit) | **+75 pp** [+47.8, +88.8] | mistral-nemo, **natural** (S8) |
+| Wrong answer, no error | **validation** (self-consistency, never the answer key) | **+25 pp** [+11.1, +40.2] best-case · **+45 pp** [+28.2, +60.2] messy-case | nemo (S9) · llama-8b (S10), natural |
+
+The capstone figure reads the whole thesis as a **capability ladder** — the same clean task, three models
+from strong to weak, baseline vs +matched-guardrails:
+
+![The capability ladder: guardrail payoff grows as the model weakens](docs/figures/capstone-ladder.png)
+
+Three honest details are load-bearing in that picture. **GLM-4.6 gets no guardrail bar** — no guardrail arm
+was ever *run* on its clean task, because four probes (20/20 clean, self-healed malformed calls, 8/8 and 8/8
+on hardened tasks) showed there was nothing to close; drawing a bar would fabricate a measurement, so an
+annotation carries the finding instead. **nemo's +100 pp gap is cross-run** (its 0/20 baseline is the S8 run,
+its 40/40 submit-nudge + validation stack is the S9 run — two independent samples, disclosed rather than
+passed off as one ablation). And **llama's bar stops at 45% by design**: the other 55% is the validator's
+measured blind spot (§11), which is exactly why the ladder's claim is *matched guardrails recover the
+recoverable slice*, not *guardrails fix weak models*.
+
+Why stop here: the story is **bracketed at both ends** — the strongest model needs no guardrails at all, and
+the weakest model's failures are partly beyond what any self-consistency guardrail can reach. Between those
+brackets, every measured lift clears zero and every null is reported as one. More models or more mechanisms
+would add bars, not understanding. The two roads not taken (a live capability-ladder sweep; a genuinely
+self-hosted endpoint) are recorded in `docs/DECISIONS.md` **D24** — they'd be new projects, not missing
+pieces of this one.
+
+```bash
+# no API, no model calls — the capstone derives from the vendored per-stage numbers and re-renders
+uv run chart.py
+```
+
+The derived `docs/figures/capstone-data.json` is rebuilt from the per-stage JSONs on every run (the one
+hand-typed number — S3's 20/20 — is documented in `chart.py`), and `uv run test_chart.py` pins both the
+derivation and the caption's honesty disclosures offline. The full reasoning is in `docs/DECISIONS.md` **D24**.
+
 ## Architecture & State Management
 
 To isolate and measure the guardrail deltas accurately without cross-contamination, the evaluation harness is built with strict boundaries around concurrency and state:
@@ -277,7 +321,7 @@ This project is a controlled testbed built to quantify mechanical agent failures
 
 * **The Semantic Blind Spot (now partly closed — and measured):** The first three guardrails fire only on *typed* failures — a tool **error** (HTTP 503 / 400) or a **missing** terminal call — so they can't see a wrong answer that raises no exception. **S9's validation guardrail closes part of that gap:** it recomputes the total from the data the model itself retrieved and rejects a mismatch (a *self-consistency* check, not an answer key). What stays blind is the harder slice — a **wrong retrieval** (a self-consistent *but wrong* answer) or a hallucination with no supporting evidence — which a self-consistency check structurally cannot catch. **S10 measured that blind spot** on llama-8b's messy natural gap: validation recovered **+45 pp** (the consistency-violating slice) while **55%** of the gap stayed un-validatable — 35% never-retrieved evidence, 10% wrong-record retrieval that *fooled* the validator, 7.5% non-numeric, 2.5% no-submit.
 * **The "Natural" gap needed a weaker model:** Frontier-grade GLM-4.6 proved robust enough that a *natural* gap never appeared (20/20 clean, self-heals malformed calls, 8/8 on a hardened task), so its guardrails had to be measured against **injected** faults (S3–S6), disclosed as such. Holding the task fixed and swapping in a **weaker** model (mistral-nemo, S8–S9) surfaced two real *natural* failures — never submitting (**+75 pp** from submit-nudge) and submitting a wrong total (**+25 pp** from validation) — the project's first un-injected gap-closures.
-* **Next steps (optional — the core deliverable is complete, and the S10 stress test is done):** (a) a **capability ladder** — the same guardrails across 2–3 models for a lift-vs-capability curve; (b) a genuinely **self-hosted** local model (the original *Forge* framing) to recover an infrastructure-level gap directly rather than by injection; (c) **declare done** and polish the write-up — with S10 the guardrail story is bracketed at both ends (best-case 100%, messy-case 45% + a quantified blind spot), a legitimate stopping point.
+* **Declared done (S11, D24):** with S10 the guardrail story is bracketed at both ends (best-case 100%, messy-case 45% + a quantified blind spot), so the project stops here on purpose — the capstone figure and the one-page story are §12. The roads not taken, recorded in `docs/DECISIONS.md` **D24**: (a) a live **capability ladder** sweep — the same guardrails across 2–3 more models (its *story* is already told by the capstone, from measured data); (b) a genuinely **self-hosted** local model (the original *Forge* framing) to recover an infrastructure-level gap directly rather than by injection. Either would be a new project decision, not a pending stage of this one.
 
 ## Reference
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart

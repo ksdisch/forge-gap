@@ -952,3 +952,86 @@ Every pre-registered rule fired as written. On the **clean** task, **llama-3.1-8
   *proof* the check isn't an answer key — an answer key could not be fooled.
 - **Reproduce:** `uv run hallucination_ablation.py meta-llama/llama-3.1-8b-instruct 40` (live, ~pennies);
   `uv run test_nudge.py` + `uv run test_chart.py` (offline). All **twelve** offline suites green.
+
+---
+
+## D24 — S11 = declare done + write-up (Option C): the capstone capability-ladder figure + the one-page story ⭐ *(scope signed off 2026-07-03; figure design signed off 2026-07-04 — no new measurements, no API spend)*
+
+This is a **start-of-stage brief** (written before the code, per the per-stage rhythm) — and it is the
+project's **closing** brief: S11 freezes scope and makes the finished story legible. Nothing here runs a
+model; every number below was already measured in S3–S10.
+
+### The choice (scope signed off 2026-07-03)
+Make S11 **declare done + portfolio write-up**: one **capstone figure** that tells the whole story on a
+single chart, a README "whole story on one page" section, and the final spine updates. The project ends
+here on purpose.
+
+- **Scope options weighed:** (a) **capability ladder as a live experiment** — run the same guardrails
+  across 2–3 models for a lift-vs-capability curve (pure harness reuse, but no new mechanism, the most
+  API spend, and passed over twice already at D22/D23 as "more of the same") · (b) **true self-hosted
+  endpoint** (llama.cpp/Ollama — the original *Forge* framing; the biggest infra lift and risk, drifts
+  the project from measurement to infrastructure, and partly duplicates S4's injected-transient result) ·
+  (c) **declare done + write-up** ✅.
+- **Why (c):** the deliverable is already complete — the thesis (each failure class → its one matched
+  guardrail, measured under the CI gate) closed at S9 and was stress-tested at S10, so the story is
+  bracketed at both ends (best-case 100%, messy-case 45% + a quantified blind spot). Adding scope now has
+  sharply diminishing returns; consolidating it has high returns — this project is a learning-and-portfolio
+  artifact, and a clean combined figure + written narrative is what makes it defensible in an interview.
+  Decisively: **(c) absorbs most of (a)'s value for free** — the lift-vs-capability story can be *drawn
+  from data already measured* (GLM/nemo/llama all ran the same clean task in S3/S8/S9/S10), so the ladder
+  becomes the capstone figure with zero new spend.
+
+### The capstone figure (design signed off 2026-07-04): the capability ladder, from measured data only
+- **Figure options weighed:** (1) **capability ladder** — three models on the clean task, strong→weak;
+  baseline vs +matched-guardrails per model ✅ · (2) **guardrail-specificity chart** — all four guardrails'
+  lifts on one axis (more conceptual; mixes injected + natural gaps on one chart) · (3) **validation
+  bracket** — S9-vs-S10 deep dive with the residual decomposition (best shows methodological honesty, but
+  the narrowest story). **Why (1):** it's the biggest-picture claim the data supports — *the weaker the
+  model, the more a matched guardrail buys, until the failure mode itself becomes un-guardrailable* — and
+  the most legible to a non-expert reader. (2)'s specificity story and (3)'s bracket story both survive as
+  one-line annotations/captions on the ladder and in the README table.
+- **The bars (every one traces to a vendored, already-measured number):**
+
+  | Model (clean task) | Baseline | + matched guardrails | Gap (Newcombe 95%) | Source |
+  | --- | --- | --- | --- | --- |
+  | GLM-4.6 (strong) | 20/20 = 100% (Wilson [83.9%, 100%]) | **no bar — no gap to close** | — | S3 clean diagnostic |
+  | mistral-nemo (mid) | 0/20 = 0% | submit-nudge + validation: 40/40 = 100% | **+100.0 pp [+81.7, +100.0]** — real | S8 baseline · S9 stack |
+  | llama-3.1-8b (weak) | 0/40 = 0% | validation: 18/40 = 45% | **+45.0 pp [+28.2, +60.2]** — real | S10 (same run) |
+
+- **Two honesty calls made at design time (deviations from the approved sketch, flagged not slipped):**
+  1. **GLM draws ONE bar.** The sketch showed a "+guardrails 100%" second bar, but no guardrail arm was
+     ever *run* on GLM's clean task — there was nothing to close (S3 20/20; S7 hardened 8/8 + 8/8). Drawing
+     that bar would fabricate a measurement. The single 100% bar carries the annotation instead ("no natural
+     gap — nothing to close"), and the caption notes GLM's guardrail wins were on the **injected** testbed
+     (+32.5 pp, S4–S5).
+  2. **nemo's gap is cross-run, and says so.** Its baseline (0/20) is the S8 run; its best stack (40/40) is
+     the S9 run. Newcombe on two independent proportions is statistically sound, but the caption discloses
+     the two runs rather than letting the pair read as one ablation. (llama's pair is a genuine same-run
+     ablation.)
+- **Data plumbing (the anti-drift rule):** a new `docs/figures/capstone-data.json` is **derived, not
+  hand-typed** — `chart.py` rebuilds it on every run from the three existing vendored JSONs
+  (`weak-gap-data.json`, `validation-data.json`, `hallucination-gap-data.json`) plus the one documented S3
+  constant (20/20, which predates the vendoring convention), recomputing the cross-run Newcombe via
+  `stats.py`. Regenerating the figure can therefore never disagree with the per-stage figures it summarizes.
+  Bar colour keeps the house rule — it follows the **measured verdict** (teal = real, steel = null), so both
+  the nemo and llama guardrail bars are teal (both gaps clear zero); llama's *partial* height plus the
+  caption carry the blind-spot story.
+- **The write-up:** a README §12 — the completed-thesis table (all four guardrails, each with its measured
+  number and testbed), the capstone figure, and a plain statement of why the project stops here (the honest
+  stopping point, limitations restated). The five per-stage figures stay untouched.
+
+### Definition of done for the project (what "declared done" means)
+S11 ships: the capstone figure + derived data JSON, README §12, this D24 finalized, ROADMAP marking
+S0–S11 complete (S12 removed — nothing is "planned" in a done project), the LEARNING S11 teaching note +
+recall questions, and `check_docs.py` green — all in one PR. After that the repo is a **finished,
+defensible artifact**; further work (a live capability ladder, a self-hosted endpoint) would be a new
+project decision, not a pending stage.
+
+### Plain-English terms
+- *capstone figure* = the single summary chart a finished project leads with — here, the capability ladder.
+- *capability ladder* = the same task run across models of increasing weakness, showing how the natural gap
+  opens up and how much of it a matched guardrail closes at each rung.
+- *cross-run comparison* = a gap computed between arms measured in two different experiments (disclosed),
+  rather than two arms of one paired ablation.
+- *derived data file* = a vendored JSON built automatically from other vendored JSONs rather than typed by
+  hand, so the summary can never silently drift from its sources.

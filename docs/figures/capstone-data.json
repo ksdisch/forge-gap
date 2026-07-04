@@ -1,0 +1,93 @@
+{
+  "kind": "capstone-ladder",
+  "task": "clean (no fault injection)",
+  "temperature": 0.7,
+  "models": [
+    {
+      "name": "GLM-4.6",
+      "tier": "strong",
+      "model": "z-ai/glm-4.6",
+      "baseline": {
+        "correct": 20,
+        "n": 20,
+        "rate": 1.0,
+        "wilson": [
+          0.8388698745050667,
+          1.0
+        ]
+      },
+      "guardrails": null,
+      "gap": null,
+      "source": "S3 clean diagnostic",
+      "note": "no natural gap \u2014 nothing to close"
+    },
+    {
+      "name": "mistral-nemo",
+      "tier": "mid",
+      "model": "mistralai/mistral-nemo",
+      "baseline": {
+        "correct": 0,
+        "n": 20,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.16113012549493322
+        ]
+      },
+      "guardrails": {
+        "correct": 40,
+        "n": 40,
+        "rate": 1.0,
+        "wilson": [
+          0.9123754607496077,
+          1.0
+        ],
+        "label": "+ submit-nudge\n+ validation"
+      },
+      "gap": {
+        "delta": 1.0,
+        "newcombe": [
+          0.8165852317264053,
+          1.0
+        ],
+        "excludes_zero": true,
+        "cross_run": true
+      },
+      "source": "S8 baseline \u00b7 S9 stack (cross-run)"
+    },
+    {
+      "name": "llama-3.1-8b",
+      "tier": "weak",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "baseline": {
+        "correct": 0,
+        "n": 40,
+        "rate": 0.0,
+        "wilson": [
+          0.0,
+          0.08762453925039232
+        ]
+      },
+      "guardrails": {
+        "correct": 18,
+        "n": 40,
+        "rate": 0.45,
+        "wilson": [
+          0.307050752809447,
+          0.6017117011155924
+        ],
+        "label": "+ validation"
+      },
+      "gap": {
+        "delta": 0.45,
+        "newcombe": [
+          0.2823320330200507,
+          0.6017117011155924
+        ],
+        "excludes_zero": true,
+        "cross_run": false
+      },
+      "source": "S10 (one ablation)"
+    }
+  ]
+}

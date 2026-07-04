@@ -65,7 +65,9 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `chart.py` — the deliverable renderer: `build_figure` (S5 2-bar gap-closure) + `build_multi_figure` (N-bar;
   bar colour follows the *measured* verdict; serves the S6 injected-malformed, S8 natural-gap, S9 stacked
   validation, and S10 hallucination figures via `caption_fn`/`subtitle`, so the honesty caption matches the
-  testbed). Reads vendored `docs/figures/*-data.json`; `uv run chart.py` regenerates all PNGs. No API, no model call.
+  testbed) + `build_capstone_figure` (S11 capability ladder; its `capstone-data.json` is DERIVED from the
+  per-stage JSONs on every run — never hand-edit it; GLM deliberately has no guardrail bar). Reads vendored
+  `docs/figures/*-data.json`; `uv run chart.py` regenerates all PNGs. No API, no model call.
 - `check_docs.py` — freshness check for the learning spine: flags any done stage missing from
   `docs/LEARNING.md`. Run `uv run check_docs.py`. A smoke alarm, not a commit gate.
 - `test_*.py` — offline, network-free suites (oracle, faults, runner, stats, recover, ablation, chart,
@@ -74,10 +76,12 @@ faults rather than found naturally, say so plainly in the README and writeup.
 - `docs/` — the **learning spine**: `ROADMAP.md` (where we are), `DECISIONS.md` (what we chose &
   why), `LEARNING.md` (plain-English walk-through + glossary + recall), plus `session-logs/` (raw
   `/wrap` recaps). Start here to catch up; see `docs/README.md`.
-- *(status)* the matched-guardrail thesis is **complete and stress-tested**: S9 built the fourth guardrail
-  (**validation**, +25 pp on mistral-nemo's clean-slip residual — the ladder 0% → 75% → 100%) and S10 measured
-  its **blind spot** on llama-8b's messy hallucination gap (+45 pp recovered; 55% un-validatable, decomposed in
-  D23). Next (S11+, optional): capability ladder / a genuinely self-hosted endpoint / declare done & write up.
+- *(status)* the project is **COMPLETE — declared done at S11 (D24)**. The matched-guardrail thesis finished
+  at S9 (validation, +25 pp — the ladder 0% → 75% → 100% on mistral-nemo), was stress-tested at S10 (+45 pp on
+  llama-8b's messy gap; 55% un-validatable, decomposed in D23), and S11 shipped the capstone capability-ladder
+  figure + README §12 write-up with **no new measurements**. Any further work (live ladder sweep, self-hosted
+  endpoint — the D24 roads not taken) is a **new project decision**, not a pending stage; open a fresh
+  decision brief before writing any experiment code.
 
 ## Methodology guardrails (load-bearing — do not drift)
 - **Deterministic oracle, never an LLM judge.** Task success is measured against known
