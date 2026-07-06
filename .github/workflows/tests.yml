@@ -1,0 +1,20 @@
+# Offline test suites only. verify.py, pilot.py, and the *_ablation.py scripts make
+# paid OpenRouter calls and must never run here — no secrets are configured on purpose.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  offline-suites:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg  # matplotlib without a display (test_chart.py)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv run pytest -q

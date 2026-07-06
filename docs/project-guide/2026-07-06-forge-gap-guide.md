@@ -201,8 +201,8 @@ calls:
   the analysis pipeline is fully reproducible from vendored data, and the honest fix for model
   stochasticity is N, not temp 0.
 - **Minor:** no LICENSE file; `chart.py` has grown to ~640 lines of figure-specific helpers;
-  the pyproject description still says "self-hosted" ambitions the project explicitly didn't
-  pursue (D24 discloses this, but a skim-reader might catch the mismatch).
+  `CLAUDE.md` and `docs/ROADMAP.md` still call GLM-4.6 "self-hosted" — an ambition the project
+  explicitly didn't pursue (D24 discloses this, but a skim-reader might catch the mismatch).
 
 ## 8. Interview readiness
 
@@ -287,7 +287,7 @@ result defensible.
 
 1. **Add CI** (GitHub Action running the 12 offline suites on PR) — ~30 min, do it before sharing
    the repo. Highest signal-per-effort.
-2. **Add a LICENSE** and fix the stale "self-hosted" phrase in `pyproject.toml` — trivial.
+2. **Add a LICENSE** and fix the stale "self-hosted" phrase in `CLAUDE.md` and `docs/ROADMAP.md` — trivial.
 3. **Consolidate tests under pytest** with one entry point — low effort, mechanical.
 4. **The D24 roads not taken**, each a *new project decision by design*: a live capability-ladder
    sweep (medium effort, mostly harness reuse + API spend) and a genuinely self-hosted endpoint via

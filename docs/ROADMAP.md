@@ -1,7 +1,7 @@
 # forge-gap — Roadmap
 
 **The project in one sentence:** reproduce and *measure* how much specific reliability
-guardrails raise a self-hosted model's (GLM-4.6) success rate on a multi-step tool task —
+guardrails raise an open-weight model's (GLM-4.6, via OpenRouter) success rate on a multi-step tool task —
 ending in a "gap-closure" chart with honest confidence intervals.
 
 Stages are labelled **S0, S1, S2, …** — each is roughly one build session.

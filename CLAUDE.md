@@ -3,8 +3,8 @@
 Project conventions and guardrails for working in this repo. Read this first each session.
 
 ## What this is
-A small harness that **reproduces and measures** reliability guardrails for a self-hosted
-model (GLM-4.6 via OpenRouter) on a multi-step tool-use task. The deliverable is a
+A small harness that **reproduces and measures** reliability guardrails for an open-weight
+model (GLM-4.6, hosted via OpenRouter) on a multi-step tool-use task. The deliverable is a
 **gap-closure chart**: how much each guardrail (retry-nudge, error-recovery) raises task
 completion over a no-mechanism baseline, measured with proper confidence intervals.
 
