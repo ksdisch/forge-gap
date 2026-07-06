@@ -15,6 +15,8 @@ faults rather than found naturally, say so plainly in the README and writeup.
 ## How to run
 - Setup: put a real `OPENROUTER_API_KEY` in `.env` (gitignored). See `README.md`.
 - Smoke test: `uv run verify.py` — exercises plain chat + one tool-calling round-trip.
+- Tests: `uv run pytest` — all 12 offline suites in one go (77 tests, no API key needed; CI runs
+  this on every PR). Any single suite still runs standalone: `uv run test_<name>.py`.
 - Anything else: `uv run <script>` — `uv` manages the venv and installs deps on first run.
 - `uv` (Python 3.11+) is the toolchain. This is an application, not a package (`package = false`).
 
