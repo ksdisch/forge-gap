@@ -183,3 +183,16 @@ To vendor more global tooling or brainstorm repo-specific automations, run `/cla
 ## Operating Constraints
 
 @.claude/operating-constraints.md
+
+## Project Wiki
+
+This project uses the project-wiki skill. When integrating new sources, recording decisions, or pausing work:
+- Update `PROJECT.md` status and next actions
+- Update `HANDOFF.md` with what changed and what's next
+- Add durable understanding to `Wiki/` topic pages
+- Record decisions in `Decisions.md`
+- Keep `Wiki/_index.md` current
+
+(`Wiki/`, `Decisions.md`, and `Sources.md` are created on first need — templates live in the skill. Note: this repo's decision log is `docs/DECISIONS.md` — record decisions there, not in a root `Decisions.md`.)
+
+Invoke the `project-wiki` skill when wiki updates are needed.
