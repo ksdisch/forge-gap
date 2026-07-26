@@ -327,3 +327,7 @@ This project is a controlled testbed built to quantify mechanical agent failures
 - OpenRouter quickstart: https://openrouter.ai/docs/quickstart
 - OpenRouter tool-calling: https://openrouter.ai/docs/guides/features/tool-calling
 - GLM-4.6 model page: https://openrouter.ai/z-ai/glm-4.6
+
+---
+
+📚 **Project wiki:** [PROJECT.md](PROJECT.md) — status, scope, and next actions · [Wiki/_index.md](Wiki/_index.md) — topic pages and history
