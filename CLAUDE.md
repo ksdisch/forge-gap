@@ -145,9 +145,6 @@ Global commands (`.claude/commands/`) and skills (`.claude/skills/`) vendored fr
 - 💻 `/envsetup` — open `.env` in the editor + the credential's generation page in Chrome, with a key stub pre-added.
 - ✅ `/explore-plan` — explore → plan → confirm before any code; proposes 2–3 ranked approaches and waits for a pick.
 - ✅ `/handoff` — generate a paste-ready handoff prompt for a fresh session; captures lessons + plan state. (Optional audio is local-only.)
-- 💻 `/mock-sql-audio` — full simulated SQL mock interview as an MP3 (local two-voice TTS).
-- ✅ `/mock-sql-demo` — text self-play mock SQL interview (interviewer + ideal candidate), then a debrief.
-- 💻 `/mock-sql-interview` — live voice mock SQL interview (local voice mode).
 - ✅ `/prompt-optimize` — one-shot prompt rewrite: diagnose, pick a workflow archetype + model + effort, return a ready-to-paste prompt. Advisory only.
 - ✅ `/reframe-orchestrator` — reframe `.claude/orchestrator.md` into a mode-independent invariants & gates doc; docs-only.
 - 💻 `/screenshot-iterate` — visual loop: implement against a mock, screenshot the running app, compare, iterate.
