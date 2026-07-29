@@ -1,8 +1,38 @@
 # forge-gap
 
-The GLM-via-OpenRouter connection you'll build AI harnesses around. OpenRouter
-exposes an **OpenAI-compatible** API, so this is a thin client over GLM-4.6 plus
-a smoke test that proves both **chat** and **tool-calling** work.
+[![tests](https://github.com/ksdisch/forge-gap/actions/workflows/tests.yml/badge.svg)](https://github.com/ksdisch/forge-gap/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**How much does each reliability guardrail actually buy on a multi-step tool-calling task —
+and which failure does each one fix?** An ablation rig that isolates four failure classes,
+matches each to one guardrail, and measures the gap under a pre-committed honesty gate:
+a Wilson 95% CI per arm, a Newcombe 95% CI on the gap, and *straddles zero = report a null,
+never a win*. The grader is deterministic — **never an LLM judge**.
+
+**Status: complete (11 stages), declared done on purpose.**
+
+| Failure class | Matched guardrail | Measured result | Testbed |
+| --- | --- | --- | --- |
+| Transient tool error (503) | **error-recovery** (harness retry, no model turn) | **+32.5 pp** [+17.3, +48.0] | GLM-4.6, **injected** (S4) |
+| Malformed tool call | **retry-nudge** (corrective re-prompt) | **null** — GLM self-heals unaided | GLM-4.6, injected (S6) |
+| Never submits (right answer, no terminal call) | **submit-nudge** | **+75 pp** [+47.8, +88.8] | mistral-nemo, **natural** (S8) |
+| Wrong answer, no error | **validation** (self-consistency, never the answer key) | **+25 pp** [+11.1, +40.2] · **+45 pp** [+28.2, +60.2] | nemo (S9) · llama-8b (S10), natural |
+
+![The capability ladder: guardrail payoff grows as the model weakens](docs/figures/capstone-ladder.png)
+
+> **Read the headline honestly.** The 67.5% → 100% figure is an **injected** fault-recovery
+> testbed — a controlled 503 injection, disclosed on the chart, never sold as a naturally
+> occurring gap. The *natural* gaps are the bottom two rows, on weaker models. GLM-4.6 gets no
+> guardrail bar at all because four probes showed it had nothing to close, and drawing one would
+> fabricate a measurement.
+
+The full reasoning — why the story is bracketed at both ends, what the validator's measured blind
+spot costs, and the two roads not taken — is in [§12](#12-the-whole-story-on-one-page-s11--declared-done).
+Part of a [reproduce-and-measure portfolio](https://github.com/ksdisch/portfolio).
+
+---
+
+## What's in here
 
 ```
 forge-gap/
