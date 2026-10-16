@@ -154,27 +154,6 @@ Global commands (`.claude/commands/`) and skills (`.claude/skills/`) vendored fr
 - ✅ `/wrap` — end-of-session recap: the why, vocabulary, active-recall quiz, next moves; saves a dated file. (Optional audio is local-only.)
 - ✅ `/document-stage` — document a just-finished stage in the learning spine, then teach + quiz Kyle. *Repo-specific (built here).*
 
-### Skills (auto-trigger by description, or invoke by name)
-
-- ✅ `artifacts-audit` — audit which engineering artifacts the repo should have; writes `docs/artifacts-plan.md`. Plans only.
-- ✅ `artifacts-generate` — generate artifacts from `docs/artifacts-plan.md` (one-at-a-time or batch). Companion to `artifacts-audit`.
-- 💻 `audio-series` — episodic NotebookLM audio series for an existing notebook (needs `nlm`/NotebookLM MCP).
-- ✅ `bug-hunt` — proactive bug hunt: fan out finder agents, adversarially verify findings, ranked triage list; optional hand-off to a fix flow.
-- 💻 `interview-prep` — init/maintain a NotebookLM interview-prep notebook from the local job-search dossier (needs `nlm`/NotebookLM MCP).
-- ✅ `kickoff` — deep one-question-at-a-time discovery interview → approved kickoff brief + phased plan → scaffold the project + GitHub repo.
-- 💻 `match-the-mock` — implement a UI against a mock and iterate via browser screenshots until it matches.
-- ✅ `mini` — kick off a new mini project under `~/Projects/mini/` (short interview + scaffold).
-- 💻 `narrate` — turn a short brief into a single-voice MP3 narration (local Kokoro TTS).
-- 💻 `nlm-skill` — expert guide for the NotebookLM CLI (`nlm`) and MCP server.
-- 💻 `notebook-assist` — refine artifacts / brainstorm / manage sources for an existing NotebookLM notebook.
-- 💻 `notebook-init` — initialize a new NotebookLM notebook end-to-end.
-- 💻 `notebook-merge` — merge 2+ overlapping NotebookLM notebooks into one unified notebook.
-- ✅ `project-guide` — comprehensive point-in-time guide to the project (purpose, architecture, history, interview lens); saves a dated file. (Optional audio is local-only.)
-- ✅ `research-paper` — end-of-project research paper + presenter pack from a completed repo's recorded results; opens a PR for review, never merges.
-- ✅ `seed-hunt` — end-of-project seed hunt: verify closure, harvest lessons into the selection bar, sweep arXiv, decision brief. (Optional audio is local-only.)
-- ✅ `ship-and-route` — land outstanding git work behind a review gate, walk the findings, route the next move with a starter prompt.
-- 💻 `video-series` — episodic NotebookLM video series for an existing notebook (needs `nlm`/NotebookLM MCP).
-
 To vendor more global tooling or brainstorm repo-specific automations, run `/claudify-repo`.
 
 ## Operating Constraints
