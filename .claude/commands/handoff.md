@@ -1,16 +1,8 @@
 ---
 description: Generate a self-contained handoff prompt I can paste into a fresh Claude Code session to continue this work without losing context. Captures hard-won lessons, what's done, and where the plan stands. Also prints a short plain-English 'what's next & why' briefing for me, so I stay oriented across the handoff. Stops the current work after generating. Project-agnostic.
-argument-hint: "[--audio [short|long]]"
-allowed-tools: Bash, Read, Write, Glob, Grep, Task, Skill, ToolSearch, SendUserFile, mcp__plugin_voicemode_voicemode__service
 ---
 
 Context handoff.
-
-## Parse `$ARGUMENTS`
-- `--audio` → after printing the handoff, also generate a spoken-audio version
-  of the brief (see "Audio narration" at the end). Optional level: `short`
-  (default) or `long`. Without `--audio`, ignore all audio steps entirely —
-  the command behaves exactly as before.
 
 I'm stopping here to switch to a fresh Claude Code session. Generate a
 self-contained prompt I can paste into a new session so it picks up exactly
@@ -39,8 +31,7 @@ Print the handoff as a single fenced code block so I can copy it verbatim —
 and print it **LAST**, so it's the final thing in the response, right above my
 prompt box. Before the block, in this order: (1) the "For Kyle" briefing (see
 "'For Kyle' briefing" below), then (2) the short run-config recommendation
-described in "Run-config recommendation" below (2–4 lines), then (3) the audio
-note **only if `--audio` was passed** (see "Audio narration") — all OUTSIDE
+described in "Run-config recommendation" below (2–4 lines) — both OUTSIDE
 the block, notes to me, not part of the paste-able prompt; none of these
 pollute the block. Then the fenced block, with nothing after it. Once it's
 printed, **STOP** — do not continue the current work and do not ask "what's
@@ -148,30 +139,3 @@ not on this session's work. Use this shape:
 Keep it terse, like the rest of the handoff. If the next action is genuinely
 ambiguous between two modes, name both and say what tips it.
 
-## Audio narration (only if `--audio` was passed)
-
-Generate a spoken version of the brief so I can listen to it on a walk instead
-of reading the block. Render the MP3 BEFORE printing the code block; its chat
-note (path + play command) goes after the run-config note, so the paste-able
-block stays the last thing in the output. It never changes the other sections'
-content.
-
-1. **Write a speakable script** — NOT the paste-able block (that's written for a
-   fresh AI; reading its scaffolding aloud is useless). Condense for the ear:
-   - `short` (default): just the **Overview** — what this work is and what's
-     being continued, in 2–4 spoken sentences (~90s).
-   - `long`: the Overview **plus Where the plan stands** — the next concrete
-     action, anything blocked, and any decision pending me (~3–4 min).
-   - Follow the narrate skill's "Writing for the ear" rules: no Markdown, expand
-     paths/branches/PR numbers into speech, drop commit SHAs and command blocks,
-     open with "Here's where things stand…" and close on the one next thing.
-2. **Hand it to the `narrate` skill** (`~/.claude/skills/narrate/`) with
-   `voice=am_adam` and `out` = next to wherever this project saves session
-   artifacts if there's a convention, else
-   `~/Projects/_audio/<ISO-date>-<project>-handoff.mp3`. The skill ensures Kokoro
-   is up, renders the MP3, and `SendUserFile`s it to me.
-3. **One line in chat** with the saved path, then — on its own line, in a fenced
-   code block — a ready-to-run play command: `afplay "<full-path>"` (the real
-   absolute path). That way I can copy-paste it to listen if I want to, or ignore
-   it. If Kokoro is unavailable, say so plainly — the text handoff still stands;
-   don't claim an MP3 exists if it doesn't (and print no play command).
