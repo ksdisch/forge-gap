@@ -1,19 +1,11 @@
 ---
 description: Open a session — orient on project state (branch, recent commits, open PRs), recap from the last /wrap log, offer an optional recall question, then route into the project's session-start spec (e.g., .claude/session-start.md). Project-agnostic.
-argument-hint: "[--audio [short|long]]"
-allowed-tools: Bash, Read, Write, Glob, Grep, Skill, ToolSearch, SendUserFile, mcp__plugin_voicemode_voicemode__service
 ---
 
 Session begin.
 
 Orient yourself silently. Orient me briefly. Route me into the project's
 session-start flow. No filler.
-
-## Parse `$ARGUMENTS`
-- `--audio` → after printing the step-2 brief, also generate a spoken-audio
-  catch-up so I can hear where I'm picking up (see "Audio catch-up" below).
-  Optional level: `short` (default) or `long`. Without `--audio`, ignore all
-  audio steps — the command behaves exactly as before.
 
 ## 1. Orient Claude (do this silently — don't narrate the reads)
 
@@ -45,31 +37,6 @@ session-start flow. No filler.
 - If no wrap log was found: say so in one line; don't synthesize a fake
   recap
 
-## 2b. Audio catch-up (only if `--audio` was passed)
-
-After printing the step-2 brief, also produce a spoken catch-up so I can hear
-where I'm resuming on the way to my desk. This is an extra artifact; it doesn't
-change the brief or the routing below — generate it, then continue to step 3.
-
-1. **Write a speakable script** from what you just briefed — not the on-screen
-   block (branch lines and PR numbers read badly aloud). Condense for the ear:
-   - `short` (default): one-breath orientation — the branch/tree state in plain
-     words plus, if a wrap log was found, its **30-second elevator version** of
-     last session (~90s). If no wrap log, just the current-state orientation.
-   - `long`: the above **plus the suggested next moves and any drift you flagged**
-     (e.g. "the recap said P R forty-two was open but it's merged now") so I hear
-     the full picture before picking a path (~3 min).
-   - Follow the narrate skill's "Writing for the ear" rules: no Markdown, expand
-     paths/branches/PR numbers into speech, drop commit SHAs, open with "Here's
-     where you're picking up…" and end on the likely next move.
-2. **Hand it to the `narrate` skill** (`~/.claude/skills/narrate/`) with
-   `voice=am_adam` and `out=~/Projects/_audio/<ISO-date>-<project>-begin.mp3`.
-   The skill ensures Kokoro is up, renders the MP3, and `SendUserFile`s it to me.
-3. **One line** with the saved path, then — on its own line, in a fenced code
-   block — a ready-to-run play command: `afplay "<full-path>"` (the real absolute
-   path) so I can copy-paste it to listen if I want to, then carry on with step 3.
-   If Kokoro is unavailable, say so in one line and continue — the on-screen brief
-   stands; never claim an MP3 exists if it doesn't (and print no play command).
 
 ## 3. Offer one optional recall question (single offer, accept skip cleanly)
 
